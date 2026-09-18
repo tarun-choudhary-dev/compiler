@@ -1,0 +1,13 @@
+{
+  "name": "pylab-browser-playground",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A static, browser-only CPython playground with bytecode inspection.",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/unit.test.mjs",
+    "test:runtime": "node tests/browser-runtime.mjs"
+  }
+}
