@@ -112,6 +112,13 @@ export async function runRuntimeTests() {
     r = await run('a = 1\n'.repeat(600));
     assert(r.trace.astNodes.length <= 500 && r.trace.codeObjects.length <= 40 && r.trace.instructions.length <= 4000, 'long source respects all inspection mapping bounds');
 
+    r = await run('x = 10 * 5\nprint(x)');
+    const binOp = r.trace.astNodes.find(n => n.type === 'BinOp');
+    assert(binOp?.fields.some(field => field.name === 'operator' && field.value === 'Mult'), 'AST detail records the real multiplication operator');
+    assert(binOp.children.map(id => r.trace.astNodes.find(n => n.id === id)?.type).filter(type => type === 'Constant').length === 2, 'AST detail exposes bounded child node IDs');
+    assert(binOp.children.every(id => r.trace.astNodes.some(n => n.id === id && n.parentId === binOp.id)), 'AST child links are stable across worker serialization');
+    assert(r.trace.astNodes.length <= 500 && r.trace.astNodes.every(n => n.fields.length <= 8), 'AST detail metadata preserves inspection bounds');
+
     return { passed: checks.length, existing: phaseOneCount, new: checks.length - phaseOneCount, checks, version: info.version };
   } finally { runtime.dispose(); }
 }

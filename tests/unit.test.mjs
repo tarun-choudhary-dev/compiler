@@ -4,6 +4,7 @@ import { processResult, formatDuration } from '../ui/results.js';
 import { PythonController } from '../controller.js';
 import { createState } from '../ui/state.js';
 import { createTrace, rangeContains, rangeOverlap, rangeEqual, rangeIntersection, lineMatches, smallestContaining } from '../ui/source-map.js';
+import { canCreateSnapshot, createSnapshot, serializeSnapshot, SNAPSHOT_VERSION, MAX_SNAPSHOT_BYTES } from '../ui/snapshot.js';
 
 test('malformed runtime payloads cannot become accidental UI strings', () => {
   const result = processResult({ stdout: {}, stderr: null, bytecode: undefined, duration: NaN, errorLine: '10' });
@@ -126,4 +127,69 @@ test('stale worker mappings cannot replace a newer run and source changes clear 
   control.receive({ type: 'result', id: 1, trace: { astNodes: [{ type: 'stale' }] } });
   assert.equal(state.trace, null);
   control.dispose();
+});
+
+test('AST details and token selection reuse the normalized source mapping', () => {
+  const source = 'x = 10 * 5';
+  const trace = createTrace({ astNodes: [
+    { type: 'Assign', lineno: 1, col_offset: 0, end_lineno: 1, end_col_offset: 10, children: ['ast-1'] },
+    { type: 'BinOp', lineno: 1, col_offset: 4, end_lineno: 1, end_col_offset: 10,
+      fields: [{ name: 'operator', value: 'Mult' }], children: ['ast-2', 'ast-3'] },
+    { type: 'Constant', lineno: 1, col_offset: 4, end_lineno: 1, end_col_offset: 6, fields: [{ name: 'value', value: '10' }] },
+    { type: 'Constant', lineno: 1, col_offset: 9, end_lineno: 1, end_col_offset: 10, fields: [{ name: 'value', value: '5' }] },
+  ], codeObjects: [{ name: '<module>', firstLine: 1 }], instructions: [
+    { codeId: 'co-0', offset: 2, opcode: 'LOAD_CONST', source: { line: 1, column: 4, endLine: 1, endColumn: 6 } },
+    { codeId: 'co-0', offset: 4, opcode: 'LOAD_CONST', source: { line: 1, column: 9, endLine: 1, endColumn: 10 } },
+    { codeId: 'co-0', offset: 6, opcode: 'BINARY_OP', source: { line: 1, column: 4, endLine: 1, endColumn: 10 } },
+  ] }, source, [
+    { type: 'NUMBER', value: '10', line: 1, column: 5, endLine: 1, endColumn: 7 },
+    { type: 'OP', value: '*', line: 1, column: 8, endLine: 1, endColumn: 9 },
+    { type: 'NUMBER', value: '5', line: 1, column: 10, endLine: 1, endColumn: 11 },
+  ]);
+  assert.deepEqual(trace.astNodes[1].fields, [{ name: 'operator', value: 'Mult' }]);
+  assert.deepEqual(trace.astNodes[1].children, ['ast-2', 'ast-3']);
+  const ast = trace.selection(1, trace.astNodes[1].range, trace.astNodes[1]);
+  assert.deepEqual(ast.tokenIndices, [0, 1, 2]);
+  assert.deepEqual(ast.instructionIds, ['co-0:2', 'co-0:4', 'co-0:6']);
+  const token = trace.tokenSelection(0);
+  assert.equal(token.selectedTokenIndex, 0);
+  assert.equal(token.astId, 'ast-2');
+  assert.deepEqual(token.instructionIds, ['co-0:2', 'co-0:6']);
+  const sourceSelection = trace.selection(1, trace.astNodes[1].range);
+  assert.deepEqual(sourceSelection.tokenIndices, [0, 1, 2]);
+});
+
+test('snapshot is versioned, CPython-specific, and contains only serializable run data', () => {
+  const source = 'x = 1';
+  const state = createState();
+  Object.assign(state, { phase: 'ready', hasRun: true, version: '3.13.2', output: '1\n',
+    tokens: [{ type: 'NUMBER', value: '1', line: 1, column: 5, endLine: 1, endColumn: 6 }],
+    astTree: 'Module', bytecode: 'LOAD_CONST', disassembly: '2 LOAD_CONST',
+    trace: createTrace({ astNodes: [{ type: 'Constant', lineno: 1, col_offset: 4, end_lineno: 1, end_col_offset: 5,
+      fields: [{ name: 'value', value: '1' }], children: [] }], codeObjects: [{ name: '<module>', firstLine: 1 }],
+    instructions: [{ codeId: 'co-0', offset: 2, opcode: 'LOAD_CONST', source: { line: 1, column: 4, endLine: 1, endColumn: 5 } }] }, source,
+    [{ type: 'NUMBER', value: '1', line: 1, column: 5, endLine: 1, endColumn: 6 }]),
+  });
+  assert(canCreateSnapshot(state, source, source));
+  const snapshot = createSnapshot(state, source);
+  assert.equal(snapshot.version, SNAPSHOT_VERSION);
+  assert.deepEqual(snapshot.runtime, { name: 'Pyodide', version: '0.29.3', pythonVersion: '3.13.2' });
+  assert.equal(snapshot.inspection.ast.nodes[0].fields[0].value, '1');
+  assert.equal(snapshot.mappings.instructions[0].source.start.column, 4);
+  assert.equal(snapshot.execution.stdout, '1\n');
+  assert.equal(snapshot.execution.error, null);
+  assert.deepEqual(JSON.parse(serializeSnapshot(snapshot)), snapshot);
+  assert(!canCreateSnapshot({ ...state, dirty: true }, source, source));
+  assert(!canCreateSnapshot(state, 'changed', source));
+  assert.throws(() => serializeSnapshot({ huge: 'x'.repeat(MAX_SNAPSHOT_BYTES) }), /too large/);
+});
+
+test('multi-line source selection returns tokens on every overlapping line', () => {
+  const tokens = [
+    { type: 'NAME', value: 'x', line: 1, column: 1, endLine: 1, endColumn: 2 },
+    { type: 'NAME', value: 'y', line: 2, column: 1, endLine: 2, endColumn: 2 },
+  ];
+  const trace = createTrace({}, 'x\ny', tokens);
+  const selection = trace.selection(1, { start: { line: 1, column: 0 }, end: { line: 2, column: 1 } });
+  assert.deepEqual(selection.tokenIndices, [0, 1]);
 });

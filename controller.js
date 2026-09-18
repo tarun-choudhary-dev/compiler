@@ -49,6 +49,14 @@ export class PythonController {
     this.showSource(node.range);
     this.view.render(this.state);
   }
+  selectToken(index) {
+    if (this.state.dirty || !this.state.trace) return;
+    const selection = this.state.trace.tokenSelection(index);
+    if (!selection) return;
+    this.state.selection = selection;
+    this.showSource(selection.range);
+    this.view.render(this.state);
+  }
   selectInstruction(id) {
     if (this.state.dirty || !this.state.trace) return;
     const instruction = this.state.trace.instructions.find(item => item.id === id);
@@ -62,14 +70,25 @@ export class PythonController {
     this.state.selection.astCandidates = candidates.map(node => node.id);
     if (instruction.range) this.showSource(instruction.range);
     else if (line) {
+      this.suppressCursor = true;
+      try { this.editor.view.setCursor({ line: line - 1, ch: 0 }); }
+      finally { this.suppressCursor = false; }
       this.editor.markTrace(null, line);
       this.editor.view.scrollIntoView({ line: line - 1, ch: 0 }, 60);
     }
-    else this.editor.clearTrace?.();
+    else this.showSource(null);
     this.view.render(this.state);
   }
   showSource(range) {
-    if (!range) { this.editor.clearTrace?.(); return; }
+    if (!range) {
+      this.editor.clearTrace?.();
+      if (this.editor.view?.somethingSelected()) {
+        this.suppressCursor = true;
+        try { this.editor.view.setCursor(this.editor.view.getCursor('head')); }
+        finally { this.suppressCursor = false; }
+      }
+      return;
+    }
     this.suppressCursor = true;
     try {
       this.editor.markTrace(range, range.start.line);

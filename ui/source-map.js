@@ -22,23 +22,33 @@ const string = (value, length = 200) => typeof value === 'string' ? value.slice(
 export function createTrace(raw, source, tokens = []) {
   const lines = source.split('\n');
   const encoder = new TextEncoder();
+  const byteColumns = new Map(), characterColumns = new Map();
   const validLine = line => Number.isSafeInteger(line) && line > 0 && line <= lines.length;
   // CPython AST/dis columns count UTF-8 bytes; CodeMirror counts UTF-16 units.
   function byteColumn(line, offset) {
     if (!validLine(line) || integer(offset) === null) return null;
-    let bytes = 0, units = 0;
-    for (const scalar of lines[line - 1]) {
-      if (bytes === offset) return units;
-      bytes += encoder.encode(scalar).length;
-      units += scalar.length;
-      if (bytes > offset) return null;
+    if (!byteColumns.has(line)) {
+      const columns = new Map([[0, 0]]);
+      let bytes = 0, units = 0;
+      for (const scalar of lines[line - 1]) {
+        bytes += encoder.encode(scalar).length;
+        units += scalar.length;
+        columns.set(bytes, units);
+      }
+      byteColumns.set(line, columns);
     }
-    return bytes === offset ? units : null;
+    return byteColumns.get(line).get(offset) ?? null;
   }
   function tokenColumn(line, oneBased) {
     const index = integer(oneBased) === null ? null : oneBased - 1;
-    return validLine(line) && index >= 0 && index <= Array.from(lines[line - 1]).length
-      ? Array.from(lines[line - 1]).slice(0, index).join('').length : null;
+    if (!validLine(line) || index < 0) return null;
+    if (!characterColumns.has(line)) {
+      const columns = [0];
+      let units = 0;
+      for (const scalar of lines[line - 1]) { units += scalar.length; columns.push(units); }
+      characterColumns.set(line, columns);
+    }
+    return characterColumns.get(line)[index] ?? null;
   }
   function makeRange(startLine, startColumn, endLine, endColumn, convert) {
     if (!validLine(startLine) || !validLine(endLine)) return null;
@@ -54,6 +64,10 @@ export function createTrace(raw, source, tokens = []) {
     id: `ast-${index}`, parentId: /^ast-\d+$/.test(n.parentId) ? n.parentId : null,
     depth: Math.min(integer(n.depth) ?? 0, 12), type: string(n.type, 60), label: string(n.label),
     lineno: n.lineno, col_offset: n.col_offset, end_lineno: n.end_lineno, end_col_offset: n.end_col_offset,
+    fields: (Array.isArray(n.fields) ? n.fields.slice(0, 8) : []).filter(f => f && typeof f === 'object').map(f => ({
+      name: string(f.name, 40), value: string(f.value, 120),
+    })),
+    children: (Array.isArray(n.children) ? n.children.slice(0, 500) : []).filter(id => typeof id === 'string' && /^ast-\d+$/.test(id)),
     range: sourceRange(n.lineno, n.col_offset, n.end_lineno, n.end_col_offset),
   }));
   const codeObjects = (Array.isArray(data.codeObjects) ? data.codeObjects.slice(0, 40) : []).filter(c => c && typeof c === 'object').map((c, index) => ({
@@ -72,7 +86,7 @@ export function createTrace(raw, source, tokens = []) {
       opcode: string(i.opcode, 60), arg: integer(i.arg), argrepr: string(i.argrepr), source: loc,
       range: loc && loc.endLine !== null ? sourceRange(loc.line, loc.column, loc.endLine, loc.endColumn) : null };
   });
-  const mappedTokens = tokens.map((item, index) => ({ ...item, index, range: tokenRange(item) }));
+  const mappedTokens = tokens.slice(0, 1500).map((item, index) => ({ ...item, index, range: tokenRange(item) }));
   const byLine = { tokens: new Map(), astNodes: new Map(), instructions: new Map() };
   const wideAst = [];
   function index(kind, entries) {
@@ -93,8 +107,7 @@ export function createTrace(raw, source, tokens = []) {
     [...(byLine[kind].get(line) ?? []), ...wideAst.filter(n => lineMatches(n.range, line))] : byLine[kind].get(line) ?? [];
   const astForRange = range => {
     if (!range) return [];
-    const candidates = [...new Set(Array.from({ length: range.end.line - range.start.line + 1 }, (_, i) => onLine('astNodes', range.start.line + i)).flat())]
-      .filter(n => n.range && (rangeContains(n.range, range) || rangeEqual(n.range, range)));
+    const candidates = astNodes.filter(n => n.range && rangeContains(n.range, range));
     const exact = candidates.filter(n => rangeEqual(n.range, range));
     if (exact.length) return exact;
     const best = smallestContaining(candidates, range);
@@ -105,9 +118,9 @@ export function createTrace(raw, source, tokens = []) {
     const covering = onLine('astNodes', line).filter(n => n.range && (range ? rangeContains(n.range, range) : true));
     const ast = preferredAst ?? (range ? smallestContaining(covering, range) : covering.sort((a,b) => size(a.range) - size(b.range))[0] ?? null);
     const narrowed = range && (compare(range.start, range.end) !== 0 || preferredInstruction);
-    const tokenItems = onLine('tokens', line).filter(t => !narrowed || !t.range || rangeOverlap(t.range, range));
-    const instructionItems = preferredInstruction ? [preferredInstruction] : onLine('instructions', line).filter(i =>
-      !narrowed || !i.range || rangeOverlap(i.range, range));
+    const tokenItems = (narrowed ? mappedTokens : onLine('tokens', line)).filter(t => !narrowed || t.range && rangeOverlap(t.range, range));
+    const instructionItems = preferredInstruction ? [preferredInstruction] : (narrowed ? instructions : onLine('instructions', line)).filter(i =>
+      !narrowed || i.range && rangeOverlap(i.range, range));
     const codeIds = [...new Set(instructionItems.map(i => i.codeId))];
     return { line, range, astId: ast?.id ?? null,
       astCandidates: preferredInstruction?.range ? astForRange(preferredInstruction.range).map(n => n.id) :
@@ -115,7 +128,18 @@ export function createTrace(raw, source, tokens = []) {
       tokenIndices: tokenItems.map(t => t.index), instructionIds: instructionItems.map(i => i.id), codeIds,
       selectedInstructionId: preferredInstruction?.id ?? null };
   }
+  function tokenSelection(index) {
+    const token = mappedTokens[index];
+    if (!token) return null;
+    const hasSpan = token.range && compare(token.range.start, token.range.end) < 0;
+    const chosen = hasSpan ? selection(token.range.start.line, token.range) :
+      { line: null, range: null, astId: null, astCandidates: [], tokenIndices: [], instructionIds: [], codeIds: [], unavailable: true };
+    chosen.kind = 'token';
+    chosen.selectedTokenIndex = index;
+    chosen.tokenIndices = [index];
+    return chosen;
+  }
   return { lines, astNodes, codeObjects, instructions, tokens: mappedTokens,
     instructionsTruncated: data.instructionsTruncated === true, onLine, selection,
-    astForRange, sourceRange, tokenRange };
+    astForRange, tokenSelection, sourceRange, tokenRange };
 }

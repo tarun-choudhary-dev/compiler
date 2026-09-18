@@ -63,15 +63,33 @@ def _pylab_make_runner():
                         return f"{name} ({key}={repr(value)[:100]})"
             return name
 
+        def detail_fields(node):
+            fields = []
+            for key, value in ast.iter_fields(node):
+                if len(fields) >= 8:
+                    break
+                if key == "ctx" or (value is None and key != "value"):
+                    continue
+                if isinstance(value, ast.operator | ast.unaryop | ast.boolop | ast.cmpop):
+                    fields.append({"name": "operator", "value": type(value).__name__})
+                elif key == "ops" and isinstance(value, list) and all(isinstance(op, ast.cmpop) for op in value):
+                    fields.append({"name": "operators", "value": ", ".join(type(op).__name__ for op in value[:8])})
+                elif isinstance(value, (str, int, float, complex, bool)) or value is None:
+                    fields.append({"name": key, "value": repr(value)[:120]})
+            return fields
+
         def visit(node, prefix="", last=True, root=True):
             nonlocal remaining
             if remaining <= 0:
                 return
             remaining -= 1
             node_id = f"ast-{len(nodes)}"
+            if node_parents:
+                nodes[int(node_parents[-1][4:])]["children"].append(node_id)
             nodes.append({
                 "id": node_id, "parentId": node_parents[-1] if node_parents else None,
                 "depth": len(node_parents), "type": type(node).__name__, "label": label(node),
+                "fields": detail_fields(node), "children": [],
                 "lineno": getattr(node, "lineno", None),
                 "col_offset": getattr(node, "col_offset", None),
                 "end_lineno": getattr(node, "end_lineno", None),

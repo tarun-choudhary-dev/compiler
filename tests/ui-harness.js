@@ -15,6 +15,8 @@ export async function runUiTests() {
   if (el('runtime-status').textContent !== 'PYTHON READY') throw new Error(el('runtime-notice').textContent);
   const editor = document.querySelector('.CodeMirror')?.CodeMirror;
   assert(editor?.getValue() === 'print("Hello, world!")', 'existing CodeMirror editor remains editable');
+  assert(el('trace-content').textContent.includes('NO INSPECTION') && el('download-inspection').disabled && el('copy-inspection').disabled && !el('download-source').disabled, 'empty inspection is explained while source remains downloadable');
+  assert(el('output-content').getAttribute('aria-live') === 'polite', 'execution output has a polite live announcement');
   assert(document.querySelectorAll('[data-stage]').length === 7 && document.querySelectorAll('[data-tab]').length === 8, 'seven compact stages and eight result tabs are present');
   click('run-button');
   await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('output-content').textContent.includes('Hello, world!'), 'default execution result', 20000);
@@ -96,5 +98,79 @@ export async function runUiTests() {
   click('tab-ast');
   [...el('ast-node-list').querySelectorAll('[data-ast-id]')].find(row => row.textContent.startsWith("Constant (value='🙂')")).click();
   assert(editor.getSelection() === '"🙂"', 'UTF-8 CPython columns highlight the correct UTF-16 editor range');
+
+  editor.setValue('x = 10 * 5\nprint(x)'); click('run-button');
+  await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('output-content').textContent === '50\n', 'AST and token explorer run', 20000);
+  click('tab-ast');
+  const binOp = [...el('ast-node-list').querySelectorAll('[data-ast-id]')].find(row => row.textContent.startsWith('BinOp'));
+  assert(binOp.tagName === 'BUTTON', 'AST tree uses keyboard-focusable native buttons');
+  binOp.click();
+  assert(editor.getSelection() === '10 * 5' && el('ast-selected-detail').textContent.includes('Operator') && el('ast-selected-detail').textContent.includes('Mult'), 'AST detail shows real operator and source location');
+  assert(el('ast-selected-detail').querySelectorAll('.detail-children [data-ast-id]').length >= 2 && el('ast-selected-detail').textContent.includes('Constant'), 'AST detail shows clickable child nodes');
+  assert(el('trace-content').textContent.includes('LOAD_CONST  50') && el('trace-content').querySelector('.inspection-summary').textContent.includes('1 instructions'), 'AST trace reflects CPython constant folding instead of inventing instructions');
+  [...el('ast-selected-detail').querySelectorAll('.detail-children [data-ast-id]')].find(row => row.textContent.includes('10')).click();
+  assert(editor.getSelection() === '10', 'AST detail child navigation returns to its exact source');
+  editor.setSelection({ line: 0, ch: 4 }, { line: 0, ch: 10 });
+  assert(el('tab-trace').getAttribute('aria-selected') === 'true' && el('trace-content').textContent.includes('NUMBER  "10"') && el('trace-content').textContent.includes('OP  "*"') && el('trace-content').textContent.includes('NUMBER  "5"'), 'source text selection finds every overlapping token');
+  assert(el('trace-content').querySelector('.inspection-summary').textContent.includes('3 tokens'), 'selection summary counts related tokens');
+  click('tab-tokens');
+  const tenRow = [...el('tokens-body').children].find(row => row.children[1].textContent === '"10"');
+  assert(tenRow.querySelector('button')?.tagName === 'BUTTON', 'token table provides native keyboard controls');
+  tenRow.querySelector('button').click();
+  assert(editor.getSelection() === '10' && tenRow.classList.contains('is-selected') && el('token-selected-detail').textContent.includes('line 1, column 5') && el('token-selected-detail').textContent.includes('line 1, column 7'), 'token detail and source range update on selection');
+  assert(el('trace-content').querySelector('.inspection-summary').textContent.includes('Token'), 'token selection updates the compact trace summary');
+
+  editor.setValue('a = 10\nx = a * 5\nprint(x)'); click('run-button');
+  await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('output-content').textContent === '50\n', 'variable expression run', 20000);
+  click('tab-ast');
+  [...el('ast-node-list').querySelectorAll('[data-ast-id]')].find(row => row.textContent.startsWith('BinOp')).click();
+  assert(el('trace-content').textContent.includes('LOAD_NAME') && el('trace-content').textContent.includes('LOAD_CONST') && el('trace-content').textContent.includes('BINARY_OP'), 'AST range reveals multiple actual bytecode instructions');
+
+  const nativeCreateUrl = URL.createObjectURL, nativeAnchorClick = HTMLAnchorElement.prototype.click;
+  const downloads = [];
+  URL.createObjectURL = blob => { downloads.push({ blob }); return `blob:pylab-test-${downloads.length}`; };
+  HTMLAnchorElement.prototype.click = function () { downloads.at(-1).filename = this.download; };
+  try {
+    click('download-source');
+    assert(downloads.at(-1).filename === 'program.py' && await downloads.at(-1).blob.text() === editor.getValue(), 'source download contains the current editor text');
+    assert(!el('download-inspection').disabled, 'completed inspection enables snapshot export');
+    click('download-inspection');
+    const snapshot = JSON.parse(await downloads.at(-1).blob.text());
+    assert(downloads.at(-1).filename === 'pylab-inspection.json' && snapshot.version === 1 && snapshot.source === editor.getValue(), 'inspection download uses a versioned JSON file');
+    assert(snapshot.runtime.pythonVersion === el('python-version').textContent.replace('PYTHON ', '') && snapshot.runtime.version === '0.29.3' && snapshot.inspection.ast.nodes.some(node => node.type === 'BinOp') && snapshot.inspection.instructions.length > 0 && snapshot.mappings.instructions.length > 0 && snapshot.execution.stdout === '50\n', 'snapshot contains runtime, AST, instructions, mappings and execution');
+    const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    let copied = '';
+    try {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async value => { copied = value; } } });
+      click('copy-inspection');
+      await until(() => el('export-status').textContent === 'Inspection copied.', 'copy inspection', 2000);
+      assert(JSON.parse(copied).source === editor.getValue(), 'copy inspection writes the same JSON snapshot');
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+      click('copy-inspection');
+      assert(el('export-status').textContent.includes('unavailable'), 'clipboard unavailability fails gracefully');
+    } finally { if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard); else delete navigator.clipboard; }
+    editor.setValue('x = 99');
+    assert(el('download-inspection').disabled && el('copy-inspection').disabled, 'source edits disable stale inspection export');
+    click('download-source');
+    assert(await downloads.at(-1).blob.text() === 'x = 99', 'source download follows unsaved edits');
+  } finally { URL.createObjectURL = nativeCreateUrl; HTMLAnchorElement.prototype.click = nativeAnchorClick; }
+
+  editor.setValue('def hello('); click('run-button');
+  await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('errors-content').textContent.includes('SyntaxError'), 'invalid snapshot run', 20000);
+  assert(el('tokens-body').children.length > 0 && el('ast-node-list').children.length === 0 && !el('download-inspection').disabled, 'invalid Python preserves tokens and permits partial inspection export');
+  {
+    const previousCreateUrl = URL.createObjectURL, previousAnchorClick = HTMLAnchorElement.prototype.click;
+    let invalidBlob;
+    URL.createObjectURL = blob => { invalidBlob = blob; return 'blob:pylab-invalid-test'; };
+    HTMLAnchorElement.prototype.click = function () {};
+    try {
+      click('download-inspection');
+      const invalidSnapshot = JSON.parse(await invalidBlob.text());
+      assert(invalidSnapshot.inspection.tokens.length > 0 && invalidSnapshot.inspection.ast.nodes.length === 0 && invalidSnapshot.inspection.instructions.length === 0 && invalidSnapshot.execution.error.includes('SyntaxError'), 'invalid Python exports only available inspection data');
+    } finally { URL.createObjectURL = previousCreateUrl; HTMLAnchorElement.prototype.click = previousAnchorClick; }
+  }
+  editor.setValue('a = 1\n'.repeat(600)); click('run-button');
+  await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('tokens-body').children.length === 1500, 'large inspection render', 20000);
+  assert(el('ast-node-list').children.length <= 500 && el('bytecode-instructions').querySelectorAll('[data-instruction-id]').length <= 4000, 'large inspection UI respects node and instruction bounds');
   return { passed: checks.length, checks };
 }

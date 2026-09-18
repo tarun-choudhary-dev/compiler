@@ -23,6 +23,8 @@ Open **http://127.0.0.1:4173**. This development utility only serves files using
 
 After running, place the cursor on a source line to see its tokens, AST constructs, code-object contexts and instructions in **Trace**. Select an AST node or an instruction in Bytecode/Disassembly to jump to its source range. **Clear** removes the trace highlight. Editing the source invalidates the mapping until the next run.
 
+The AST tree and token table are interactive too. Select a node to inspect its fields and children, or select a token to inspect its value and start/end positions. The Trace tab shows the related items found from CPython's locations. **Download source** saves the current editor text as `program.py`. After a completed run, **Download inspection** saves a versioned JSON snapshot as `pylab-inspection.json`; **Copy inspection** copies that JSON when the browser permits clipboard access. A source edit disables inspection export until you run again.
+
 Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the editor and focuses the result tabs. Arrow keys, Home, and End navigate tabs.
 
 ## Complete source structure
@@ -43,18 +45,20 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 ├── controller.js            # Run lifecycle, timeout, Stop/retry, stale-run guard
 ├── package.json             # Optional dependency-free development commands
 ├── editor/
-│   └── editor.js            # CodeMirror adapter, indentation, error line marker
+│   └── editor.js            # CodeMirror adapter, indentation, source/error markers
 ├── runtime/
 │   ├── config.js            # Pinned CDN dependency and resource limits
 │   ├── assets.js            # Runtime download/cache, failure/retry handling
 │   ├── runtime.js           # Sandbox lifecycle and private message channel
 │   ├── sandbox.html         # Opaque-origin iframe and restrictive CSP
 │   ├── worker.js            # Pyodide bootstrap and stdout/stderr capture
-│   └── inspector.py         # tokenize, AST, compile, code object, dis, exec
+│   └── inspector.py         # tokenize, AST, compile, locations, dis, exec
 ├── ui/
 │   ├── state.js             # Explicit UI state
 │   ├── results.js           # Bounded, validated worker result processing
-│   └── view.js              # Text-only rendering and tab state
+│   ├── view.js              # Text-only rendering and tab state
+│   ├── source-map.js        # Normalized ranges and cached relationships
+│   └── snapshot.js          # Versioned JSON inspection and browser downloads
 ├── vendor/codemirror/
 │   ├── codemirror.js
 │   ├── codemirror.css
@@ -74,7 +78,7 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 
 `node scripts/build.mjs` generates `dist/` containing the public entry files, `editor/`, `runtime/`, `ui/`, `vendor/`, license notices, and `.nojekyll`. `dist/` is ignored by Git. No server entry point is generated.
 
-Phase 3 adds `ui/source-map.js` alongside the listed UI modules. It normalizes source positions, caches line lookups, and resolves source/AST/instruction selections. `runtime/inspector.py` provides the CPython location metadata; `controller.js`, `editor/editor.js`, and `ui/view.js` handle selection state, marks, and rendering.
+`ui/source-map.js` normalizes source positions, caches line lookups, and resolves source/token/AST/instruction selections. `ui/snapshot.js` packages a completed run for browser-only export. `runtime/inspector.py` provides CPython metadata; `controller.js`, `editor/editor.js`, and `ui/view.js` handle selection state, marks, and rendering.
 
 ## How execution works
 
@@ -114,9 +118,9 @@ Execution and output
 
 The viewer runs Python's `tokenize.generate_tokens()` and `ast.parse()` independently on the same source. `compile(source, ...)` then performs CPython's normal compilation, including its own parsing; the displayed AST is the real tree for that source, but is not passed as the literal argument to `compile()`. WebAssembly runs **CPython itself** in the browser. The program's bytecode is interpreted by that CPython runtime.
 
-The Tokens tab shows Python's `tokenize` output, including comments, whitespace-related tokens and positions (displayed as one-based columns). Unfinished input such as `print(` can yield partial tokens and a warning. Tokenization of malformed source is not guaranteed to be stable across Python versions.
+The Tokens tab shows Python's `tokenize` output, including comments, whitespace-related tokens and start/end positions (displayed as one-based columns). Select a table row to inspect the token and highlight its source. Selecting source text finds all tokens whose ranges overlap it. Unfinished input such as `print(` can yield partial tokens and a warning. Tokenization of malformed source is not guaranteed to be stable across Python versions.
 
-The AST tab shows a concise traversal of the actual `ast.parse()` tree. Open its disclosure for `ast.dump(..., indent=2)`. A valid AST can exist even when compilation rejects a program, such as a top-level `return`.
+The AST tab shows a selectable traversal of the actual `ast.parse()` tree. The compact detail panel reports the selected node's location, useful fields such as its operator or value, and direct children. Select a child to follow it into source and Trace. Open the disclosure for the original text tree or `ast.dump(..., indent=2)`. A valid AST can exist even when compilation rejects a program, such as a top-level `return`.
 
 `compile(source, 'main.py', 'exec', dont_inherit=True, optimize=0)` produces a genuine CPython code object. The Code object tab reads:
 
@@ -144,6 +148,12 @@ The reported Python version comes from the running interpreter, not a hard-coded
 PYLAB retains token start/end positions, AST `lineno`/`col_offset`/`end_lineno`/`end_col_offset`, and `dis.Instruction.positions` from compiled CPython code objects. The Python inspector serializes these values with stable AST IDs and distinct IDs for nested code objects. It does not change the AST or pass raw Python objects through `postMessage`. The browser normalizes ranges, caches line relationships for the current run, and uses CodeMirror marks to highlight source. AST and instruction columns are UTF-8 byte offsets; token columns count Python characters; CodeMirror uses UTF-16 offsets. The conversion handles non-ASCII identifiers and strings.
 
 The **Trace** tab gives line-based relationships when a source line is selected. A more precise source region, AST node or instruction uses available ranges to narrow candidates. The AST list, bytecode list and disassembly list can jump back to source; the original text tree, raw bytes and `dis.dis` listing remain in disclosures. Syntax errors still leave partial tokens while later stages show as unavailable. The mapping is not always one-to-one: a statement can generate many instructions, multiple constructs can share a location, and some instructions have missing or only line-level metadata. PYLAB displays missing locations explicitly rather than inventing an exact association. The trace describes compiler metadata, not a step-by-step execution history.
+
+## Inspection snapshots
+
+`pylab-inspection.json` uses schema version `1`. It contains the source from the completed run, the actual Pyodide and Python version identifiers, bounded tokens and AST nodes, code-object records, CPython bytecode text and structured instructions, disassembly, normalized source mappings, and captured stdout/stderr/error. It contains JSON data only; importing it is not supported and downloading it never executes Python. The browser builds the file with `Blob` and an object URL. Copy uses the Clipboard API only when available; downloads require no clipboard permission.
+
+The bytecode and disassembly are **CPython-specific and version-dependent**. Compilation can fold constants or otherwise transform an AST construct, so an AST `BinOp` need not produce a `BINARY_OP`. Missing locations remain `null`; exported mappings are evidence from CPython metadata, not a perfect debugger map. Snapshot export is capped at 5 MB and disabled while the current source differs from the last completed run. Source download always uses the current editor text.
 
 ## Isolation and limits
 
@@ -209,10 +219,10 @@ node tests/browser-runtime.mjs
 
 The second command starts a temporary static file server and an isolated headless Chromium profile, then runs production Pyodide inside the real sandbox/worker. Set `CHROME_PATH` if Chrome/Edge is not at a detected path. Runtime download access is required. The fixture is excluded from `dist/`.
 
-The integration suite covers actual output, no-newline Unicode, stderr, exception types and lines, all inspection stages, nested functions/classes, loops, imports, Unicode identifiers and strings, syntax errors, fresh globals, bridge restrictions, output limits, and terminating/restarting an infinite loop. It also checks real CPython positions and the actual app page's source, AST and instruction selection paths. Unit tests cover empty source, stale/duplicate runs, structured result validation, range operations, Unicode column conversion, missing locations, size limits and clearing old inspection results.
+The integration suite covers actual output, no-newline Unicode, stderr, exception types and lines, all inspection stages, nested functions/classes, loops, imports, Unicode identifiers and strings, syntax errors, fresh globals, bridge restrictions, output limits, and terminating/restarting an infinite loop. It also checks real CPython positions, AST fields and child links, interactive token/AST/instruction selection, downloads, snapshot contents, copy fallback, empty states, large inspections, and the mobile layout. Unit tests cover run lifecycle, result validation, range operations, Unicode conversion, token/AST relationships, snapshot schema and size bounds.
 
 For release QA, also check current Firefox and Safari, mobile touch editing, keyboard/screen-reader navigation, slow or blocked runtime downloads, long lines, and 200% text enlargement. Browser rendering and accessibility require their own manual review; automated runtime checks do not establish those properties.
 
 ## What to build next
 
-Next, add a small AST/token detail view that can compare related constructs without losing the current selection, and offer downloadable source/inspection results. Keep multi-file workspaces, REPL state, packages and additional language runtimes behind separate adapters so the current execution path remains small.
+Next, add optional read-only snapshot import with strict schema validation and no automatic execution, then consider a focused side-by-side comparison of two saved inspections. Keep multi-file workspaces, REPL state, packages and additional language runtimes behind separate adapters so the current execution path remains small.

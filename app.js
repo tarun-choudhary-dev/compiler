@@ -2,6 +2,7 @@ import { PythonEditor } from './editor/editor.js';
 import { PythonController } from './controller.js';
 import { createState } from './ui/state.js';
 import { PlaygroundView } from './ui/view.js';
+import { canCreateSnapshot, createSnapshot, serializeSnapshot, downloadText } from './ui/snapshot.js';
 
 const state = createState();
 const view = new PlaygroundView();
@@ -60,7 +61,7 @@ for (const stage of view.stages) {
 
 try {
   editor = new PythonEditor(document.getElementById('source'), {
-    onRun: () => controller?.run(), onChange: () => controller?.changed(),
+    onRun: () => controller?.run(), onChange: () => { controller?.changed(); document.getElementById('export-status').textContent = ''; },
     onCursor: (line, column) => { document.getElementById('cursor-position').textContent = `Ln ${line}, Col ${column}`; controller?.selectSource(); },
   });
   controller = new PythonController({ editor, state, view });
@@ -68,10 +69,38 @@ try {
   document.querySelector('.result-panels').addEventListener('click', event => {
     const ast = event.target.closest('[data-ast-id]');
     const instruction = event.target.closest('[data-instruction-id]');
+    const token = event.target.closest('[data-token-index]');
     if (ast) controller.selectAst(ast.dataset.astId);
     else if (instruction) controller.selectInstruction(instruction.dataset.instructionId);
+    else if (token) controller.selectToken(Number(token.dataset.tokenIndex));
   });
   document.getElementById('clear-trace').addEventListener('click', () => controller.clearSelection());
+  const exportStatus = document.getElementById('export-status');
+  document.getElementById('download-source').addEventListener('click', () => {
+    downloadText('program.py', editor.getValue(), 'text/x-python;charset=utf-8');
+    exportStatus.textContent = 'Source downloaded.';
+  });
+  const inspectionJson = () => {
+    if (!canCreateSnapshot(state, editor.getValue(), controller.sourceAtRun)) {
+      exportStatus.textContent = 'Run the current source before exporting its inspection.';
+      return null;
+    }
+    try { return serializeSnapshot(createSnapshot(state, controller.sourceAtRun)); }
+    catch (error) { exportStatus.textContent = error instanceof Error ? error.message : 'Inspection export failed.'; return null; }
+  };
+  document.getElementById('download-inspection').addEventListener('click', () => {
+    const json = inspectionJson();
+    if (json === null) return;
+    downloadText('pylab-inspection.json', json, 'application/json;charset=utf-8');
+    exportStatus.textContent = 'Inspection downloaded.';
+  });
+  document.getElementById('copy-inspection').addEventListener('click', async () => {
+    const json = inspectionJson();
+    if (json === null) return;
+    if (!navigator.clipboard?.writeText) { exportStatus.textContent = 'Clipboard access is unavailable in this browser.'; return; }
+    try { await navigator.clipboard.writeText(json); exportStatus.textContent = 'Inspection copied.'; }
+    catch { exportStatus.textContent = 'Clipboard access was blocked. Download the inspection instead.'; }
+  });
   document.getElementById('run-button').addEventListener('click', () => controller.run());
   document.getElementById('stop-button').addEventListener('click', () => controller.stop());
   document.getElementById('retry-button').addEventListener('click', () => controller.initialize());
