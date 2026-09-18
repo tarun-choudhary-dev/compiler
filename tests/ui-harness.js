@@ -15,6 +15,13 @@ export async function runUiTests() {
   if (el('runtime-status').textContent !== 'PYTHON READY') throw new Error(el('runtime-notice').textContent);
   const editor = document.querySelector('.CodeMirror')?.CodeMirror;
   assert(editor?.getValue() === 'print("Hello, world!")', 'existing CodeMirror editor remains editable');
+  assert(getComputedStyle(document.documentElement).backgroundColor === 'rgb(24, 24, 24)' &&
+    getComputedStyle(document.documentElement).color === 'rgb(224, 224, 224)', 'page uses charcoal and muted light text');
+  assert(getComputedStyle(editor.getWrapperElement()).backgroundColor === 'rgb(29, 29, 29)' &&
+    getComputedStyle(document.querySelector('.CodeMirror-gutters')).backgroundColor === 'rgb(29, 29, 29)', 'editor and line-number gutter use the dark surface');
+  assert(getComputedStyle(el('run-button')).backgroundColor === 'rgb(208, 208, 208)' &&
+    getComputedStyle(el('run-button')).color === 'rgb(27, 27, 27)' &&
+    getComputedStyle(el('live-workspace')).borderTopColor === 'rgb(88, 88, 88)', 'Run button and workspace border remain distinct');
   assert(el('trace-content').textContent.includes('NO INSPECTION') && el('download-inspection').disabled && el('copy-inspection').disabled && !el('download-source').disabled, 'empty inspection is explained while source remains downloadable');
   assert(el('output-content').getAttribute('aria-live') === 'polite', 'execution output has a polite live announcement');
   assert(document.querySelectorAll('[data-stage]').length === 7 && document.querySelectorAll('[data-tab]').length === 8, 'seven compact stages and eight result tabs are present');
@@ -197,6 +204,7 @@ export async function runUiTests() {
     if (el('snapshot-status').textContent.includes('INVALID SNAPSHOT')) throw new Error(el('snapshot-status').textContent);
     const readOnlyEditor = el('snapshot-editor-host').querySelector('.CodeMirror').CodeMirror;
     assert(readOnlyEditor.getOption('readOnly') === true && readOnlyEditor.getValue() === importedA.source && el('snapshot-metadata').textContent.includes('READ ONLY'), 'imported source opens in a separate read-only CodeMirror');
+    assert(getComputedStyle(readOnlyEditor.getWrapperElement()).backgroundColor === 'rgb(29, 29, 29)', 'imported read-only editor keeps the dark theme');
     importFile('A', '{ "version": 2 }', 'wrong-version.json');
     await until(() => el('snapshot-status').textContent.includes('INVALID SNAPSHOT'), 'invalid replacement status', 2000);
     assert(readOnlyEditor.getValue() === importedA.source && el('mode-snapshot').getAttribute('aria-pressed') === 'true', 'invalid replacement preserves the previously loaded snapshot');
@@ -224,6 +232,8 @@ export async function runUiTests() {
     importFile('B', JSON.stringify(importedB), 'untrusted-b.json');
     await until(() => el('mode-compare').getAttribute('aria-pressed') === 'true' && !el('compare-content').hidden, 'comparison mode', 2000);
     assert(el('compare-meta-a').textContent.includes('untrusted-a.json') && el('compare-meta-b').textContent.includes('untrusted-b.json') && !el('compare-runtime-warning').hidden, 'two imported snapshots show side-by-side metadata and runtime warning');
+    assert(getComputedStyle(el('compare-workspace')).backgroundColor === 'rgb(32, 32, 32)' &&
+      getComputedStyle(document.querySelector('.compare-row[data-status=CHANGED]')).backgroundColor === 'rgb(44, 44, 44)', 'comparison differences use a distinct charcoal surface');
     click('inspect-a');
     assert(readOnlyEditor.getValue() === importedA.source && el('mode-snapshot').getAttribute('aria-pressed') === 'true', 'comparison opens snapshot A for read-only inspection');
     click('mode-compare'); click('inspect-b');

@@ -41,7 +41,8 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 ├── README.md
 ├── THIRD_PARTY.md
 ├── index.html               # Accessible app shell, result panels, reading pages
-├── style.css                # Monochrome responsive layout and editor theme
+├── style.css                # Monochrome responsive layout
+├── dark.css                 # Soft charcoal palette and component states
 ├── favicon.svg
 ├── app.js                   # App wiring, navigation, keyboard controls
 ├── controller.js            # Run lifecycle, timeout, Stop/retry, stale-run guard
@@ -82,7 +83,7 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
     └── ui-harness.js        # Tests the real editor and pipeline controls
 ```
 
-`node scripts/build.mjs` generates `dist/` containing the public entry files, `editor/`, `runtime/`, `ui/`, `vendor/`, license notices, and `.nojekyll`. `dist/` is ignored by Git. No server entry point is generated.
+`node scripts/build.mjs` generates `dist/` containing the public entry files, both stylesheets, `editor/`, `runtime/`, `ui/`, `vendor/`, license notices, and `.nojekyll`. `dist/` is ignored by Git. No server entry point is generated. `dark.css` applies the charcoal theme across Live, Snapshot, Compare, and the reading pages without changing execution behavior.
 
 `ui/source-map.js` normalizes source positions, caches line lookups, and resolves source/token/AST/instruction selections. `ui/snapshot.js` packages a completed run for browser-only export. `ui/snapshot-validator.js` gates untrusted import before any view state changes; `ui/compare.js` operates on validated JSON data only. `ui/snapshot-session.js` and `ui/snapshot-view.js` provide read-only selection and comparison rendering. `runtime/inspector.py` provides CPython metadata; `controller.js`, `editor/editor.js`, and `ui/view.js` handle live selection state, marks, and rendering. The imported view shares `ui/view.js` and has its own read-only editor.
 

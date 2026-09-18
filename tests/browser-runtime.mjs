@@ -79,11 +79,13 @@ try {
     return { width: innerWidth, visible, expanded: menu.getAttribute('aria-expanded'),
       stacked: getComputedStyle(document.querySelector('.workspace')).gridTemplateColumns.split(' ').length === 1,
       noPageOverflow: document.documentElement.scrollWidth <= innerWidth,
-      editorUsable: !!document.querySelector('.CodeMirror').CodeMirror };
+      editorUsable: !!document.querySelector('.CodeMirror').CodeMirror,
+      darkMenu: getComputedStyle(document.getElementById('navigation')).backgroundColor === 'rgb(24, 24, 24)',
+      darkEditor: getComputedStyle(document.querySelector('.CodeMirror')).backgroundColor === 'rgb(29, 29, 29)' };
   })()`, returnByValue: true });
   const checks = mobile.result?.result?.value;
-  if (mobile.error || !checks || checks.width !== 390 || !checks.visible || checks.expanded !== 'true' || !checks.stacked || !checks.noPageOverflow || !checks.editorUsable) throw new Error(`Mobile layout failed: ${JSON.stringify(checks || mobile)}`);
-  console.log(JSON.stringify({ mobile: { passed: 6, checks } }, null, 2));
+  if (mobile.error || !checks || checks.width !== 390 || !checks.visible || checks.expanded !== 'true' || !checks.stacked || !checks.noPageOverflow || !checks.editorUsable || !checks.darkMenu || !checks.darkEditor) throw new Error(`Mobile layout failed: ${JSON.stringify(checks || mobile)}`);
+  console.log(JSON.stringify({ mobile: { passed: 8, checks } }, null, 2));
   const mobileSnapshots = await command('Runtime.evaluate', { expression: `(async () => {
     const files = window.__pylabTestSnapshots;
     const load = async (slot, json) => {
@@ -96,13 +98,15 @@ try {
     await load('a', files[0]);
     const snapshotStacked = getComputedStyle(document.getElementById('snapshot-workspace')).gridTemplateColumns.split(' ').length === 1;
     const snapshotNoOverflow = document.documentElement.scrollWidth <= innerWidth;
+    const snapshotDark = getComputedStyle(document.getElementById('snapshot-workspace')).backgroundColor === 'rgb(32, 32, 32)';
     await load('b', files[1]);
-    return { snapshotStacked, snapshotNoOverflow,
+    return { snapshotStacked, snapshotNoOverflow, snapshotDark,
       compareStacked: getComputedStyle(document.querySelector('.compare-sides')).gridTemplateColumns.split(' ').length === 1,
       compareNoOverflow: document.documentElement.scrollWidth <= innerWidth,
-      compareVisible: !document.getElementById('compare-workspace').hidden };
+      compareVisible: !document.getElementById('compare-workspace').hidden,
+      compareDark: getComputedStyle(document.getElementById('compare-workspace')).backgroundColor === 'rgb(32, 32, 32)' };
   })()`, awaitPromise: true, returnByValue: true });
   const layout = mobileSnapshots.result?.result?.value;
   if (mobileSnapshots.error || !layout || Object.values(layout).some(value => value !== true)) throw new Error(`Mobile snapshots failed: ${JSON.stringify(layout || mobileSnapshots)}`);
-  console.log(JSON.stringify({ mobileSnapshots: { passed: 5, checks: layout } }, null, 2));
+  console.log(JSON.stringify({ mobileSnapshots: { passed: 7, checks: layout } }, null, 2));
 } finally { socket?.close(); chrome.kill(); server.close(); }

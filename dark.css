@@ -1,0 +1,147 @@
+/* PYLAB's monochrome dark palette. Layout and behavior remain in style.css. */
+:root {
+  color-scheme: dark;
+  --ink: #e0e0e0;
+  --muted: #b0b0b0;
+  --line: #3b3b3b;
+  --paper: #181818;
+  --wash: #262626;
+  --surface: #202020;
+  --editor: #1d1d1d;
+  --raised: #2a2a2a;
+  --related: #303030;
+  --selected: #404040;
+  --strong-line: #585858;
+}
+
+html { scrollbar-color: #585858 var(--paper); }
+::selection { background: #4b4b4b; color: #f2f2f2; }
+button, input, textarea { color: var(--ink); }
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible,
+.snapshot-import:focus-within { outline-color: #dedede; }
+.skip-link { background: #dedede; color: var(--paper); }
+
+/* Shell, navigation, and reading pages. */
+.site-header, .status-bar { background: var(--paper); }
+.logo-mark { border-color: #aaa; }
+.site-header nav a[aria-current], .pipeline-stages button:hover,
+.pipeline-stages button[aria-current=step] { color: var(--ink); }
+.site-header nav a[aria-current]:after { background: #d0d0d0; }
+.pipeline-stages button[aria-current=step] { border-bottom-color: #d0d0d0; }
+.header-note, .eyebrow, .heading-note, .section-number,
+.execution-status, .pipeline-label, .pipeline-stages button,
+.panel-description, .inspection-placeholder, .inspection-subheading,
+.empty-state p, .empty-shortcut, .workspace-caption, .status-bar,
+.snapshot-status, .compare-empty { color: var(--muted); }
+h1 > span, .empty-glyph { color: #a8a8a8; }
+.lead, .reading-page article p { color: #bcbcbc; }
+.reading-page code { background: var(--raised); color: var(--ink); }
+.pipeline li { background: var(--surface); border-color: var(--strong-line); }
+.pipeline li:not(:last-child):after,
+.pipeline-stages button:not(:first-child):before { color: #aaa; }
+.back-link, .workspace-caption a { color: #c9c9c9; }
+
+/* Workspace and editor, including CodeMirror's own light defaults. */
+.workspace, .compare-workspace { background: var(--surface); border-color: var(--strong-line); box-shadow: none; }
+.editor-pane, .result-pane, #snapshot-result-slot { background: var(--surface); }
+.pane-toolbar, .result-tabs { background: #222; }
+.file-label, kbd { background: var(--raised); border-color: #505050; color: #c7c7c7; }
+#source, #snapshot-source, #editor-host, #snapshot-editor-host,
+.CodeMirror, .CodeMirror-gutters, .CodeMirror-scrollbar-filler,
+.CodeMirror-gutter-filler { background: var(--editor); color: var(--ink); }
+.CodeMirror-gutters { border-right: 1px solid #303030; }
+.CodeMirror-linenumber, .CodeMirror-guttermarker-subtle { color: #999; }
+.CodeMirror-guttermarker { color: #d5d5d5; }
+.CodeMirror-cursor, .CodeMirror div.CodeMirror-secondarycursor { border-left-color: #e0e0e0; }
+.CodeMirror-selected { background: #3b3b3b !important; }
+.CodeMirror-focused .CodeMirror-selected { background: #484848 !important; }
+.CodeMirror .CodeMirror-matchingbracket {
+  color: #f1f1f1 !important;
+  background: #454545;
+}
+.CodeMirror .CodeMirror-nonmatchingbracket { color: #dedede; text-decoration: underline wavy #999; }
+.CodeMirror-activeline-background { background: #252525; }
+.cm-s-default .cm-keyword, .cm-s-default .cm-builtin { color: #ececec; }
+.cm-s-default .cm-string, .cm-s-default .cm-string-2 { color: #c4c4c4; }
+.cm-s-default .cm-number, .cm-s-default .cm-atom { color: #d5d5d5; }
+.cm-s-default .cm-comment { color: #a0a0a0; }
+.cm-s-default .cm-def, .cm-s-default .cm-variable,
+.cm-s-default .cm-variable-2, .cm-s-default .cm-variable-3,
+.cm-s-default .cm-operator, .cm-s-default .cm-meta,
+.cm-s-default .cm-property, .cm-s-default .cm-type,
+.cm-s-default .cm-qualifier, .cm-s-default .cm-bracket,
+.cm-s-default .cm-tag, .cm-s-default .cm-attribute,
+.cm-s-default .cm-link, .cm-s-default .cm-header,
+.cm-s-default .cm-quote, .cm-negative, .cm-positive,
+.cm-invalidchar { color: var(--ink); }
+.cm-s-default .cm-error { color: #f0f0f0; text-decoration: underline wavy #aaa; }
+.editor-error-line { background: #352f2f; box-shadow: inset 3px 0 #aaa; }
+.editor-trace-line { background: #292929; }
+.editor-trace-range { background: #494949; border-bottom-color: #aaa; }
+.editor-footer { border-top-color: var(--line); color: #a9a9a9; }
+.separator { color: #777; }
+
+/* Results, navigation states, and execution controls. */
+.result-tabs button, .compare-tabs button { color: #b2b2b2; }
+.result-tabs button:hover, .result-tabs button[aria-selected=true],
+.compare-tabs button:hover, .compare-tabs button[aria-selected=true] { color: #f0f0f0; }
+.result-tabs button[aria-selected=true], .compare-tabs button[aria-selected=true] { border-bottom-color: #d0d0d0; }
+.result-panels, .result-panels > [role=tabpanel] { background: var(--surface); color: var(--ink); }
+#error-count { background: #c7c7c7; color: var(--paper); }
+.panel-label, .tokens-table th, .ast-dump summary,
+.raw-inspection summary, .inspection-group, .detail-kicker,
+.trace-group h3, .inspection-summary span:last-child { color: #bdbdbd; }
+.tokens-table th, .tokens-table td { border-bottom-color: var(--line); }
+.tokens-table td:nth-child(2), .trace-group p { color: #c8c8c8; }
+.ast-dump, .raw-inspection, .trace-group { border-top-color: var(--line); }
+.run-toolbar { background: #242424; }
+.status-dot { border-color: #aaa; }
+.status-dot.ready { background: #c6c6c6; border-color: #c6c6c6; }
+.keyboard-hint { color: #aaa; }
+.run-button { background: #d0d0d0; border-color: #d0d0d0; color: #1b1b1b; }
+.run-button:hover:not(:disabled) { background: #eeeeee; border-color: #eeeeee; }
+.run-button:disabled { background: #505050; border-color: #666; color: #c8c8c8; }
+.secondary-button { background: var(--raised); border-color: #777; color: var(--ink); }
+.secondary-button:hover { background: #383838; }
+.text-button { color: #dedede; }
+.runtime-notice, .inspection-warning, .snapshot-status.invalid {
+  background: var(--raised);
+  border-left-color: #bcbcbc;
+  color: var(--ink);
+}
+
+/* Trace, AST/token details, and selectable instruction rows. */
+.trace-link, .detail-children button, .token-button,
+.export-toolbar button { color: var(--ink); }
+.inspection-row { background: var(--surface); border-bottom-color: var(--line); color: var(--ink); }
+.inspection-row:hover, .inspection-row.is-related,
+.tokens-table tr.is-related { background: var(--related); }
+.inspection-row.is-selected, .tokens-table tr.is-selected {
+  background: var(--selected);
+  box-shadow: inset 2px 0 #d0d0d0;
+}
+.inspection-row.location-unavailable, .instruction-source { color: #aaa; }
+.detail-panel { background: #262626; border-color: #4a4a4a; color: var(--ink); }
+.detail-grid dt { color: #b6b6b6; }
+.export-toolbar button:disabled { color: #808080; }
+.export-toolbar #export-status { color: #b9b9b9; }
+
+/* Snapshot and comparison surfaces. */
+.mode-switch button, .snapshot-actions button, .snapshot-import { color: #bdbdbd; }
+.mode-switch button[aria-pressed=true] { color: #f0f0f0; border-bottom-color: #d0d0d0; }
+.mode-switch button:disabled, .snapshot-actions button:disabled { color: #808080; }
+.snapshot-metadata dt, .compare-sides dt { color: #b4b4b4; }
+.compare-sides, .compare-summary, .compare-tabs { background: var(--surface); }
+.compare-summary span { background: #272727; border-color: #4a4a4a; }
+.compare-tabs button { background: var(--surface); }
+.compare-row { border-top-color: var(--line); }
+.compare-row > :nth-child(2) { border-right-color: var(--line); }
+.compare-row[data-status=CHANGED], .compare-row[data-status=ADDED],
+.compare-row[data-status=REMOVED] { background: #2c2c2c; }
+.compare-row-header { background: #282828; color: #c7c7c7; }
+.compare-row .diff-status small { color: #b5b5b5; }
+
+@media (max-width: 700px) {
+  .site-header nav { background: var(--paper); border-bottom-color: var(--strong-line); }
+  .editor-pane, .compare-sides > div:first-child { border-bottom-color: var(--line); }
+}
