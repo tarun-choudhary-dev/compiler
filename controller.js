@@ -14,16 +14,22 @@ export class PythonController {
     return this.runtime.initialize();
   }
   changed() {
+    this.state.activeStage = 'source';
     if (this.state.hasRun) { this.state.dirty = true; this.view.render(this.state); }
   }
   run() {
     if (this.state.phase !== 'ready') return;
     const source = this.editor.getValue();
     this.editor.clearError();
-    Object.assign(this.state, { output: '', stderr: '', error: '', bytecode: '', disassembly: '', truncated: false, hasRun: true, dirty: false, notice: '', duration: 0 });
+    Object.assign(this.state, {
+      output: '', stderr: '', error: '', tokens: [], tokenError: '', tokensTruncated: false,
+      astTree: '', astDump: '', astError: '', compileError: '', codeObject: '', bytecode: '', disassembly: '',
+      truncated: false, hasRun: true, dirty: false, notice: '', duration: 0,
+    });
     if (!source.trim() || source.length > MAX_SOURCE_CHARS) {
       this.state.error = !source.trim() ? 'Nothing to run. Write some Python code first.' : 'This program is too large. Keep the source under 100,000 characters.';
       this.state.activeTab = 'errors';
+      this.state.activeStage = '';
       this.view.render(this.state);
       return;
     }
@@ -31,6 +37,7 @@ export class PythonController {
     this.state.phase = 'running';
     this.state.runId++;
     this.state.activeTab = 'output';
+    this.state.activeStage = 'output';
     this.view.render(this.state);
     this.timer = setTimeout(() => this.stop('Execution stopped after 15 seconds. Python has been reset; simplify your program and run again.'), EXECUTION_TIMEOUT_MS);
     this.runtime.run(this.state.runId, source);
@@ -42,6 +49,7 @@ export class PythonController {
     this.state.runId++;
     this.state.error = reason;
     this.state.activeTab = 'errors';
+    this.state.activeStage = '';
     this.initialize();
   }
   receive(message) {
@@ -60,7 +68,7 @@ export class PythonController {
       } else if (message.type === 'result') {
         clearTimeout(this.timer);
         Object.assign(this.state, result, { phase: 'ready', dirty: this.editor.getValue() !== this.sourceAtRun });
-        if (result.error || result.stderr) this.state.activeTab = 'errors';
+        if (result.error || result.stderr) { this.state.activeTab = 'errors'; this.state.activeStage = ''; }
         if (result.error && !this.state.dirty) this.editor.markError(result.errorLine);
       }
     }

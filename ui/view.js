@@ -2,8 +2,10 @@ import { formatDuration } from './results.js';
 
 export class PlaygroundView {
   constructor() {
-    this.elements = Object.fromEntries(['run-button','stop-button','retry-button','runtime-status','runtime-dot','runtime-notice','python-version','execution-status','output-empty','output-content','bytecode-content','disassembly-content','errors-content','error-count'].map(id => [id, document.getElementById(id)]));
+    this.elements = Object.fromEntries(['run-button','stop-button','retry-button','runtime-status','runtime-dot','runtime-notice','python-version','execution-status','output-empty','output-content','tokens-warning','tokens-placeholder','tokens-table','tokens-body','ast-tree-content','ast-dump-content','code-object-content','bytecode-content','disassembly-content','errors-content','error-count'].map(id => [id, document.getElementById(id)]));
     this.tabs = [...document.querySelectorAll('[data-tab]')];
+    this.stages = [...document.querySelectorAll('[data-stage]')];
+    this.renderedTokens = null;
   }
   selectTab(name, focus = false) {
     for (const tab of this.tabs) {
@@ -12,6 +14,12 @@ export class PlaygroundView {
       tab.tabIndex = selected ? 0 : -1;
       document.getElementById(tab.getAttribute('aria-controls')).hidden = !selected;
       if (selected && focus) tab.focus();
+    }
+  }
+  selectStage(name) {
+    for (const stage of this.stages) {
+      if (stage.dataset.stage === name) stage.setAttribute('aria-current', 'step');
+      else stage.removeAttribute('aria-current');
     }
   }
   render(state) {
@@ -30,9 +38,33 @@ export class PlaygroundView {
     el['output-empty'].hidden = state.hasRun;
     el['output-content'].hidden = !state.hasRun;
     el['output-content'].textContent = state.output + (state.truncated ? '\n[Output limit reached: further output omitted.]' : '') || (state.phase === 'running' ? 'Running…' : state.error ? 'No standard output. See Errors for details.' : 'Program finished without standard output.');
-    el['bytecode-content'].textContent = state.bytecode || (state.hasRun ? 'No bytecode available for this run.' : 'Run your code to inspect its bytecode.');
-    el['disassembly-content'].textContent = state.disassembly || (state.hasRun ? 'No disassembly available for this run.' : 'Run your code to inspect its instructions.');
+    el['tokens-warning'].textContent = [state.tokenError, state.tokensTruncated ? 'Further tokens omitted.' : ''].filter(Boolean).join('\n');
+    el['tokens-warning'].hidden = !el['tokens-warning'].textContent;
+    el['tokens-placeholder'].hidden = state.tokens.length > 0;
+    el['tokens-placeholder'].textContent = state.hasRun ? (state.phase === 'running' ? 'Tokenizing…' : 'No tokens available for this run.') : 'Run your code to inspect its tokens.';
+    el['tokens-table'].hidden = state.tokens.length === 0;
+    if (this.renderedTokens !== state.tokens) {
+      const rows = document.createDocumentFragment();
+      for (const item of state.tokens) {
+        const row = document.createElement('tr');
+        for (const value of [item.type, JSON.stringify(item.value), item.line, item.column]) {
+          const cell = document.createElement('td');
+          cell.textContent = String(value);
+          row.append(cell);
+        }
+        rows.append(row);
+      }
+      el['tokens-body'].replaceChildren(rows);
+      this.renderedTokens = state.tokens;
+    }
+    el['ast-tree-content'].textContent = state.astTree || state.astError || (state.hasRun ? (state.phase === 'running' ? 'Parsing…' : 'No AST available for this run.') : 'Run your code to inspect its AST.');
+    el['ast-dump-content'].textContent = state.astDump;
+    document.querySelector('.ast-dump').hidden = !state.astDump;
+    el['code-object-content'].textContent = state.codeObject || state.compileError || (state.hasRun ? 'No code object available for this run.' : 'Run your code to inspect its code object.');
+    el['bytecode-content'].textContent = state.bytecode || state.compileError || (state.hasRun ? 'No bytecode available for this run.' : 'Run your code to inspect its bytecode.');
+    el['disassembly-content'].textContent = state.disassembly || state.compileError || (state.hasRun ? 'No disassembly available for this run.' : 'Run your code to inspect its instructions.');
     el['errors-content'].textContent = [state.stderr, state.error].filter(Boolean).join(state.stderr.endsWith('\n') ? '' : '\n') || 'No errors to show.';
     this.selectTab(state.activeTab);
+    this.selectStage(state.activeStage);
   }
 }

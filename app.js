@@ -27,14 +27,34 @@ document.getElementById('menu-toggle').addEventListener('click', event => {
 window.addEventListener('hashchange', navigate);
 
 for (const tab of view.tabs) {
-  tab.addEventListener('click', () => { state.activeTab = tab.dataset.tab; view.selectTab(state.activeTab); });
+  tab.addEventListener('click', () => { state.activeTab = tab.dataset.tab; state.activeStage = state.activeTab; view.selectTab(state.activeTab); view.selectStage(state.activeStage); });
   tab.addEventListener('keydown', event => {
     const index = view.tabs.indexOf(tab);
-    const next = { ArrowRight: (index + 1) % 4, ArrowLeft: (index + 3) % 4, Home: 0, End: 3 }[event.key];
+    const next = { ArrowRight: (index + 1) % view.tabs.length, ArrowLeft: (index + view.tabs.length - 1) % view.tabs.length, Home: 0, End: view.tabs.length - 1 }[event.key];
     if (next === undefined) return;
     event.preventDefault();
     state.activeTab = view.tabs[next].dataset.tab;
+    state.activeStage = state.activeTab;
     view.selectTab(state.activeTab, true);
+    view.selectStage(state.activeStage);
+  });
+}
+
+for (const stage of view.stages) {
+  stage.addEventListener('click', () => {
+    const name = stage.dataset.stage;
+    if (name === 'source') {
+      state.activeStage = 'source';
+      view.selectStage('source');
+      editor?.view.focus();
+    } else if (name === 'output' && state.phase === 'ready') {
+      controller?.run();
+    } else {
+      state.activeTab = name;
+      state.activeStage = name;
+      view.selectTab(name);
+      view.selectStage(name);
+    }
   });
 }
 

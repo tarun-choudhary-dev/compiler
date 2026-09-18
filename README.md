@@ -1,6 +1,6 @@
 # PYLAB
 
-A complete static Python playground. Write Python, execute it locally in your browser, and inspect the actual CPython bytecode and disassembly.
+A complete static Python playground. Write Python, execute it locally in your browser, and inspect the actual tokens, AST, code object, bytecode and disassembly.
 
 There is no execution backend, Python server, database, API key, or execution API. The shipped site is ordinary HTML, CSS, JavaScript, and a Python inspection helper loaded as text into the browser runtime. `runtime/inspector.py` is **never executed by a server**.
 
@@ -18,7 +18,7 @@ Open **http://127.0.0.1:4173**. This development utility only serves files using
 
 1. Wait for **PYTHON READY** (the first download can take a little while).
 2. Run `print("Hello, world!")` with **Run code** or **Ctrl/Cmd + Enter**.
-3. Switch between **Output**, **Bytecode**, **Disassembly**, and **Errors**.
+3. Switch between **Output**, **Tokens**, **AST**, **Code object**, **Bytecode**, **Disassembly**, and **Errors**. The compact pipeline opens each stage; **Source** focuses the editor and **Run** executes the current source.
 4. Use **Stop** to terminate a long-running program and restart Python. Code remains in the editor.
 
 Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the editor and focuses the result tabs. Arrow keys, Home, and End navigate tabs.
@@ -48,7 +48,7 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 │   ├── runtime.js           # Sandbox lifecycle and private message channel
 │   ├── sandbox.html         # Opaque-origin iframe and restrictive CSP
 │   ├── worker.js            # Pyodide bootstrap and stdout/stderr capture
-│   └── inspector.py         # compile(), code object inspection, dis, exec
+│   └── inspector.py         # tokenize, AST, compile, code object, dis, exec
 ├── ui/
 │   ├── state.js             # Explicit UI state
 │   ├── results.js           # Bounded, validated worker result processing
@@ -66,7 +66,8 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
     ├── unit.test.mjs        # Controller and result-processing tests
     ├── browser-runtime.mjs  # Headless Chromium integration test runner
     ├── harness.html         # Test fixture; excluded from deployment build
-    └── runtime-harness.js   # Tests the actual browser WASM execution path
+    ├── runtime-harness.js   # Tests the actual browser WASM execution path
+    └── ui-harness.js        # Tests the real editor and pipeline controls
 ```
 
 `node scripts/build.mjs` generates `dist/` containing the public entry files, `editor/`, `runtime/`, `ui/`, `vendor/`, license notices, and `.nojekyll`. `dist/` is ignored by Git. No server entry point is generated.
@@ -74,11 +75,9 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 ## How execution works
 
 ```text
-CodeMirror → PythonController → isolated runtime → Web Worker → Pyodide/CPython
-                                                            ↓
-                                               compile → inspect → exec
-                                                            ↓
-Result panels ← validated text results ← MessageChannel ← stdout/stderr/errors
+Browser page → sandboxed iframe → Web Worker → Pyodide → CPython → Python program
+      ↑                                                           ↓
+Result panels ← validated JSON/text ← MessageChannel ← inspect + stdout/stderr/errors
 ```
 
 The page fetches five fixed assets for Pyodide 0.29.3 from jsDelivr: its loader, CPython JavaScript glue, WebAssembly binary, standard-library archive, and package lock file. The assets are retained in memory for runtime restarts. CodeMirror is included locally, so a runtime download failure leaves the editor and navigation usable.
@@ -87,31 +86,51 @@ An iframe with `sandbox="allow-scripts"` (without `allow-same-origin`) creates a
 
 Each program is compiled as `main.py` and executed with a fresh globals dictionary. Standard streams are captured separately, including Unicode, whitespace, and text without a final newline. Python exceptions become readable tracebacks; syntax and runtime errors point to the relevant editor line. A source edit during execution does not incorrectly highlight a line in the edited version.
 
+The worker returns **one result** per run containing structured tokens, AST tree and dump, code-object metadata, formatted bytecode, disassembly, stdout, stderr and errors. The page validates and bounds that result. All source-derived values enter the UI as text, including token table cells; no Python output is interpreted as HTML. The inspector and program run in the same worker, never on the main UI thread.
+
 Fresh globals are not a fresh interpreter: imported modules, changes to built-ins, and Pyodide's ephemeral in-memory filesystem can survive ordinary runs. A worker reset/page reload clears the interpreter. This is a script playground, not a persistent REPL.
 
 ## How inspection works
 
-`compile(source, 'main.py', 'exec', dont_inherit=True, optimize=0)` produces a genuine CPython code object. Before executing it, the inspector reads:
+The compilation journey shown in the interface is:
+
+```text
+Python source
+    ↓ tokenization
+Tokens (type, value, line, column)
+    ↓ parsing
+Abstract syntax tree
+    ↓ compile()
+CPython code object
+    ↓ co_code
+Python bytecode
+    ↓ CPython virtual machine
+Execution and output
+```
+
+The viewer runs Python's `tokenize.generate_tokens()` and `ast.parse()` independently on the same source. `compile(source, ...)` then performs CPython's normal compilation, including its own parsing; the displayed AST is the real tree for that source, but is not passed as the literal argument to `compile()`. WebAssembly runs **CPython itself** in the browser. The program's bytecode is interpreted by that CPython runtime.
+
+The Tokens tab shows Python's `tokenize` output, including comments, whitespace-related tokens and positions (displayed as one-based columns). Unfinished input such as `print(` can yield partial tokens and a warning. Tokenization of malformed source is not guaranteed to be stable across Python versions.
+
+The AST tab shows a concise traversal of the actual `ast.parse()` tree. Open its disclosure for `ast.dump(..., indent=2)`. A valid AST can exist even when compilation rejects a program, such as a top-level `return`.
+
+`compile(source, 'main.py', 'exec', dont_inherit=True, optimize=0)` produces a genuine CPython code object. The Code object tab reads:
 
 - `co_consts`, `co_names`, `co_varnames`, `co_freevars`, and `co_cellvars`;
 - argument counts, local-variable count, `co_stacksize`, and `co_flags`;
-- `co_code`, formatted as hexadecimal byte values with byte offsets;
+- `co_name`, `co_filename`, argument counts and the bytecode length from `co_code`;
 - nested code objects for functions, comprehensions, and similar constructs.
 
-`dis.dis(..., adaptive=False, show_caches=False)` displays readable CPython operations. Bytecode inspection includes raw inline cache bytes; the disassembly hides cache entries, so offsets can have gaps. Nested inspection is depth/size limited. A runtime exception preserves inspection output; a syntax error has no compiled code object to inspect.
+The Bytecode tab pairs decoded instructions from `dis.get_instructions()` with the raw `co_code` bytes in hexadecimal, including nested code objects. `dis.dis(..., adaptive=False, show_caches=False)` provides the separate human-readable Disassembly tab for nested functions/classes too. Raw bytes include inline caches while the instruction listings hide them, so offsets can have gaps. A runtime exception preserves completed inspection results; a syntax error shows the parsing/compilation error in later stages and no fabricated code object.
 
 Python bytecode is **not native machine code** and is **not WebAssembly**:
 
 ```text
-Python source
-    ↓ compile()
-Python bytecode
-    ↓ interpreted by
-CPython's Python virtual machine
-    ↓ compiled into
-WebAssembly runtime
-    ↓ executed by
-Browser WebAssembly engine
+Python source → tokens → AST → code object → Python bytecode
+                                                   ↓ interpreted by
+                                     CPython's Python virtual machine
+                                                   ↓ runs as
+                                  WebAssembly in the browser engine
 ```
 
 The reported Python version comes from the running interpreter, not a hard-coded UI label. Instructions and bytecode formats are version-specific.
@@ -122,7 +141,7 @@ The reported Python version comes from the running interpreter, not a hard-coded
 - Runtime assets are downloaded by the host before execution. The worker's replacement `fetch` only resolves a fixed in-memory asset map; it has no network fallback. CSP independently blocks network through other APIs.
 - Pyodide's `jsglobals` is an empty, frozen object. No DOM, fetch, clipboard, camera, microphone, geolocation, or host filesystem APIs are supplied to Python. The public `pyodide_js` bridge is unregistered.
 - The page accepts only execution messages over a dedicated MessageChannel. It never evaluates result strings or inserts them as HTML.
-- Only one execution can run at once. Programs have a 15-second wall-time limit. Output is limited to 100,000 characters; source to 100,000 characters. Inspection text and nesting are also bounded.
+- Only one execution can run at once. Programs have a 15-second wall-time limit. Output is limited to 100,000 characters; source to 100,000 characters. Token display stops after 1,500 entries, the AST tree after 500 nodes, and nested code inspection after 40 code objects or 12 levels. Inspection text is also bounded and reports omissions where appropriate.
 - Browsers do not provide a portable hard memory quota for workers. Extreme allocation can still exhaust a tab before the watchdog can recover it. Pyodide and Python introspection are not, by themselves, a hostile-code sandbox. Keep this deployment on a dedicated origin without sensitive same-origin services, and do not weaken the iframe sandbox or CSP.
 - Python's in-memory virtual filesystem exists as part of CPython/Pyodide; this app does not expose or mount the user's real filesystem.
 
@@ -180,10 +199,10 @@ node tests/browser-runtime.mjs
 
 The second command starts a temporary static file server and an isolated headless Chromium profile, then runs production Pyodide inside the real sandbox/worker. Set `CHROME_PATH` if Chrome/Edge is not at a detected path. Runtime download access is required. The fixture is excluded from `dist/`.
 
-The integration suite covers actual output, no-newline Unicode, stderr, exception types and lines, inspection metadata, nested functions, fresh globals, standard-library imports, bridge restrictions, output floods, and terminating/restarting an infinite loop. Unit tests cover empty source, stale/duplicate runs, result limits, and clearing old inspection results.
+The integration suite covers actual output, no-newline Unicode, stderr, exception types and lines, all inspection stages, nested functions/classes, loops, imports, Unicode identifiers and strings, syntax errors, fresh globals, bridge restrictions, output limits, and terminating/restarting an infinite loop. It also loads the actual app page to test CodeMirror, tabs, clickable stages, error states and text-only rendering. Unit tests cover empty source, stale/duplicate runs, structured result validation, size limits and clearing old inspection results.
 
 For release QA, also check current Firefox and Safari, mobile touch editing, keyboard/screen-reader navigation, slow or blocked runtime downloads, long lines, and 200% text enlargement. Browser rendering and accessibility require their own manual review; automated runtime checks do not establish those properties.
 
 ## What to build next
 
-Start with an **AST viewer** and **token viewer** using the existing inspector and result-message boundary. They directly explain how source becomes bytecode without requiring accounts, a backend, or package installation. Next, add explicit downloadable source/inspection results. Keep multi-file workspaces, REPL state, packages, and additional language runtimes behind separate adapters so the current execution path remains small.
+Next, connect source ranges to AST nodes and bytecode instructions so selecting a line highlights its corresponding compilation stages. Add explicit downloadable source/inspection results once that mapping is clear. Keep multi-file workspaces, REPL state, packages and additional language runtimes behind separate adapters so the current execution path remains small.

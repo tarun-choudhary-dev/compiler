@@ -53,6 +53,44 @@ export async function runRuntimeTests() {
     await new Promise(resolve => setTimeout(resolve, 150));
     const reset = wait('ready'); runtime.initialize(); await reset;
     r = await run('print("recovered")'); assert(r.stdout === 'recovered\n', 'infinite worker can be stopped and reset');
-    return { passed: checks.length, checks, version: info.version };
+    const phaseOneCount = checks.length;
+
+    r = await run('x = 10\nprint(x * 2)');
+    const xToken = r.tokens.find(item => item.type === 'NAME' && item.value === 'x');
+    assert(xToken?.line === 1 && xToken?.column === 1 && r.tokens.some(item => item.type === 'NUMBER' && item.value === '10'), 'token types, values and one-based positions come from tokenize');
+    assert(r.tokens.some(item => item.type === 'OP' && item.value === '*') && r.tokens.some(item => item.type === 'NAME' && item.value === 'print'), 'operator and callable tokens are structured');
+    assert(r.astTree.startsWith('Module\n') && r.astTree.includes('Assign') && r.astTree.includes('Call') && r.astTree.includes('BinOp'), 'actual AST tree has expected nodes');
+    assert(r.astDump.includes('Module(') && r.astDump.includes('Constant(value=10)'), 'actual ast.dump is available');
+    assert(r.codeObject.includes('CPYTHON CODE OBJECT') && r.codeObject.includes('co_name: <module>') && r.codeObject.includes('co_filename: main.py'), 'compiled code object identity and filename');
+    assert(r.codeObject.includes('co_argcount: 0') && r.codeObject.includes('co_nlocals: 0') && r.codeObject.includes('co_stacksize:') && r.codeObject.includes('co_flags:') && r.codeObject.includes('co_consts:') && r.codeObject.includes('co_names:') && r.codeObject.includes('co_varnames:') && r.codeObject.includes('bytecode length:'), 'code object metadata fields');
+    assert(r.bytecode.includes('Offset') && r.bytecode.includes('Opcode') && r.bytecode.includes('Argument') && r.bytecode.includes('LOAD_CONST') && r.bytecode.includes('Bytecode bytes') && /\b[0-9a-f]{2} [0-9a-f]{2}\b/.test(r.bytecode), 'decoded opcodes and raw hexadecimal bytes coexist');
+
+    r = await run('def double(value):\n    return value * 2\nclass Thing:\n    def size(self):\n        return 3\nprint(double(4))');
+    assert(r.stdout === '8\n' && r.astTree.includes('FunctionDef (name=\'double\')') && r.astTree.includes('ClassDef (name=\'Thing\')'), 'nested function and class AST');
+    assert(r.codeObject.includes('CPYTHON CODE OBJECT: double') && r.codeObject.includes('co_argcount: 1') && r.codeObject.includes('CPYTHON CODE OBJECT: Thing'), 'nested code object metadata');
+    assert(r.bytecode.includes('CODE OBJECT: double') && r.bytecode.includes('CODE OBJECT: Thing') && r.disassembly.includes('Disassembly of'), 'nested bytecode and disassembly remain available');
+
+    r = await run('total = 0\nfor i in range(3):\n    total += i\nprint(total)');
+    assert(r.stdout === '3\n' && r.astTree.includes('For') && r.bytecode.includes('FOR_ITER'), 'loops appear through AST, bytecode and execution');
+    r = await run('import math\nprint(math.factorial(4))');
+    assert(r.stdout === '24\n' && r.astTree.includes('Import') && r.codeObject.includes('math') && r.bytecode.includes('IMPORT_NAME'), 'standard-library imports traverse the pipeline');
+    r = await run('café = "λ🙂"\nprint(café)');
+    assert(r.stdout === 'λ🙂\n' && r.tokens.some(item => item.value === 'café') && r.tokens.some(item => item.type === 'STRING' && item.value === '"λ🙂"') && r.astDump.includes('café'), 'Unicode identifiers and strings survive each stage');
+
+    r = await run('print(');
+    assert(r.tokens.some(item => item.value === 'print') && r.tokenError.includes('SYNTAX ERROR'), 'incomplete expression retains partial tokens and a tokenization error');
+    assert(r.astError.startsWith('SYNTAX ERROR') && r.compileError.startsWith('SYNTAX ERROR') && !r.codeObject && !r.bytecode && !r.disassembly && r.error.includes('SyntaxError'), 'invalid source gives useful syntax errors in every later stage');
+    r = await run('x =');
+    assert(r.tokens.some(item => item.value === 'x') && r.astError.includes('SyntaxError') && !r.codeObject, 'parse error after successful tokenization');
+    r = await run('return 1');
+    assert(r.astTree.includes('Return') && r.compileError.includes('SYNTAX ERROR') && !r.bytecode, 'valid AST with invalid top-level return cannot produce code object');
+    r = await run('print("before")\nraise ValueError("after")');
+    assert(r.stdout === 'before\n' && r.astTree.includes('Raise') && r.codeObject && r.bytecode && r.disassembly && r.error.includes('ValueError'), 'runtime error preserves all completed inspection stages');
+    r = await run('print("clean")');
+    assert(r.stdout === 'clean\n' && !r.astError && !r.compileError && !r.tokenError && r.astTree, 'subsequent run clears prior syntax errors');
+    r = await run('a = 1\n'.repeat(600));
+    assert(r.tokens.length === 1500 && r.tokensTruncated, 'large token streams are bounded');
+
+    return { passed: checks.length, existing: phaseOneCount, new: checks.length - phaseOneCount, checks, version: info.version };
   } finally { runtime.dispose(); }
 }

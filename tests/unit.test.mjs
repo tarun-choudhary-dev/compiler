@@ -35,8 +35,30 @@ test('simultaneous runs and stale responses are ignored', () => {
   assert.equal(state.output, '1\n'); assert.equal(state.phase, 'ready'); control.dispose();
 });
 test('syntax errors cannot retain bytecode from the preceding run', () => {
-  const { control, state } = controller('def :'); state.bytecode = 'old bytecode';
+  const { control, state } = controller('def :'); state.bytecode = 'old bytecode'; state.astTree = 'old AST'; state.codeObject = 'old code object';
   control.run(); assert.equal(state.bytecode, '');
+  assert.equal(state.astTree, ''); assert.equal(state.codeObject, '');
   control.receive({ type: 'result', id: 1, error: 'SyntaxError', errorLine: 1 });
   assert.equal(state.activeTab, 'errors'); assert.equal(state.bytecode, ''); control.dispose();
+});
+test('structured tokens are bounded and malformed fields become safe values', () => {
+  const result = processResult({ tokens: [null, { type: 'NAME', value: '<script>', line: 2, column: 3 }, { type: {}, value: undefined, line: NaN, column: -4 }] });
+  assert.deepEqual(result.tokens[0], { type: 'NAME', value: '<script>', line: 2, column: 3 });
+  assert.deepEqual(result.tokens[1], { type: '', value: '', line: 0, column: 0 });
+  assert.equal(result.tokens.length, 2);
+  const many = processResult({ tokens: Array.from({ length: 1700 }, () => ({ type: 'NAME', value: 'x' })) });
+  assert.equal(many.tokens.length, 1500); assert.equal(many.tokensTruncated, true);
+});
+test('AST and code object text is validated and size-limited', () => {
+  const result = processResult({ astTree: 'x'.repeat(120000), astDump: { fake: true }, codeObject: '<img>', astError: null, compileError: 'SYNTAX ERROR' });
+  assert.equal(result.astTree.length, 100000); assert.equal(result.astDump, '');
+  assert.equal(result.codeObject, '<img>'); assert.equal(result.astError, ''); assert.equal(result.compileError, 'SYNTAX ERROR');
+});
+test('a new run clears all inspection stages and stale responses remain ignored', () => {
+  const { control, state } = controller();
+  Object.assign(state, { astTree: 'old', codeObject: 'old', tokens: [{ value: 'old' }], phase: 'ready' });
+  control.run();
+  assert.deepEqual(state.tokens, []); assert.equal(state.astTree, ''); assert.equal(state.codeObject, '');
+  control.receive({ type: 'result', id: 0, tokens: [{ value: 'stale' }], astTree: 'stale' });
+  assert.deepEqual(state.tokens, []); assert.equal(state.astTree, ''); control.dispose();
 });

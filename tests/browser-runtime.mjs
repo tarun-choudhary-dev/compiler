@@ -64,4 +64,11 @@ try {
   const result = await command('Runtime.evaluate', { expression: `import(${JSON.stringify(new URL('runtime-harness.js', url).href)}).then(module => module.runRuntimeTests())`, awaitPromise: true, returnByValue: true, timeout: 240000 });
   if (result.error || result.result?.exceptionDetails) throw new Error(JSON.stringify(result.error || result.result.exceptionDetails));
   console.log(JSON.stringify(result.result.result.value, null, 2));
+  const appUrl = new URL('../index.html', url).href;
+  const appLoaded = new Promise(resolve => { onLoaded = resolve; });
+  await command('Page.navigate', { url: appUrl });
+  await appLoaded;
+  const uiResult = await command('Runtime.evaluate', { expression: `import(${JSON.stringify(new URL('ui-harness.js', url).href)}).then(module => module.runUiTests())`, awaitPromise: true, returnByValue: true, timeout: 240000 });
+  if (uiResult.error || uiResult.result?.exceptionDetails) throw new Error(JSON.stringify(uiResult.error || uiResult.result.exceptionDetails));
+  console.log(JSON.stringify({ ui: uiResult.result.result.value }, null, 2));
 } finally { socket?.close(); chrome.kill(); server.close(); }
