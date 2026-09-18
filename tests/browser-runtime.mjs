@@ -73,19 +73,22 @@ try {
   console.log(JSON.stringify({ ui: uiResult.result.result.value }, null, 2));
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   const mobile = await command('Runtime.evaluate', { expression: `(() => {
-    const menu = document.getElementById('menu-toggle');
+    const menu = document.getElementById('snapshot-menu');
     const visible = getComputedStyle(menu).display !== 'none';
-    menu.click();
-    return { width: innerWidth, visible, expanded: menu.getAttribute('aria-expanded'),
+    menu.open = true;
+    const headerControlsReachable = ['import-python-button', 'export-menu', 'run-button', 'snapshot-menu']
+      .every(id => { const rect = document.getElementById(id).getBoundingClientRect(); return rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth; });
+    const footerFits = document.querySelector('.editor-footer').getBoundingClientRect().right <= innerWidth;
+    return { width: innerWidth, visible, expanded: menu.open, headerControlsReachable, footerFits,
       stacked: getComputedStyle(document.querySelector('.workspace')).gridTemplateColumns.split(' ').length === 1,
       noPageOverflow: document.documentElement.scrollWidth <= innerWidth,
       editorUsable: !!document.querySelector('.CodeMirror').CodeMirror,
-      darkMenu: getComputedStyle(document.getElementById('navigation')).backgroundColor === 'rgb(24, 24, 24)',
+      darkMenu: getComputedStyle(document.querySelector('.snapshot-toolbar')).backgroundColor === 'rgb(29, 29, 29)',
       darkEditor: getComputedStyle(document.querySelector('.CodeMirror')).backgroundColor === 'rgb(29, 29, 29)' };
   })()`, returnByValue: true });
   const checks = mobile.result?.result?.value;
-  if (mobile.error || !checks || checks.width !== 390 || !checks.visible || checks.expanded !== 'true' || !checks.stacked || !checks.noPageOverflow || !checks.editorUsable || !checks.darkMenu || !checks.darkEditor) throw new Error(`Mobile layout failed: ${JSON.stringify(checks || mobile)}`);
-  console.log(JSON.stringify({ mobile: { passed: 8, checks } }, null, 2));
+  if (mobile.error || !checks || checks.width !== 390 || !checks.visible || !checks.expanded || !checks.headerControlsReachable || !checks.footerFits || !checks.stacked || !checks.noPageOverflow || !checks.editorUsable || !checks.darkMenu || !checks.darkEditor) throw new Error(`Mobile layout failed: ${JSON.stringify(checks || mobile)}`);
+  console.log(JSON.stringify({ mobile: { passed: 10, checks } }, null, 2));
   const mobileSnapshots = await command('Runtime.evaluate', { expression: `(async () => {
     const files = window.__pylabTestSnapshots;
     const load = async (slot, json) => {
@@ -98,13 +101,13 @@ try {
     await load('a', files[0]);
     const snapshotStacked = getComputedStyle(document.getElementById('snapshot-workspace')).gridTemplateColumns.split(' ').length === 1;
     const snapshotNoOverflow = document.documentElement.scrollWidth <= innerWidth;
-    const snapshotDark = getComputedStyle(document.getElementById('snapshot-workspace')).backgroundColor === 'rgb(32, 32, 32)';
+    const snapshotDark = getComputedStyle(document.getElementById('snapshot-workspace')).backgroundColor === 'rgb(24, 24, 24)';
     await load('b', files[1]);
     return { snapshotStacked, snapshotNoOverflow, snapshotDark,
       compareStacked: getComputedStyle(document.querySelector('.compare-sides')).gridTemplateColumns.split(' ').length === 1,
       compareNoOverflow: document.documentElement.scrollWidth <= innerWidth,
       compareVisible: !document.getElementById('compare-workspace').hidden,
-      compareDark: getComputedStyle(document.getElementById('compare-workspace')).backgroundColor === 'rgb(32, 32, 32)' };
+      compareDark: getComputedStyle(document.getElementById('compare-workspace')).backgroundColor === 'rgb(24, 24, 24)' };
   })()`, awaitPromise: true, returnByValue: true });
   const layout = mobileSnapshots.result?.result?.value;
   if (mobileSnapshots.error || !layout || Object.values(layout).some(value => value !== true)) throw new Error(`Mobile snapshots failed: ${JSON.stringify(layout || mobileSnapshots)}`);

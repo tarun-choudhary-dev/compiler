@@ -15,36 +15,70 @@ export async function runUiTests() {
   if (el('runtime-status').textContent !== 'PYTHON READY') throw new Error(el('runtime-notice').textContent);
   const editor = document.querySelector('.CodeMirror')?.CodeMirror;
   assert(editor?.getValue() === 'print("Hello, world!")', 'existing CodeMirror editor remains editable');
-  assert(getComputedStyle(document.documentElement).backgroundColor === 'rgb(24, 24, 24)' &&
-    getComputedStyle(document.documentElement).color === 'rgb(224, 224, 224)', 'page uses charcoal and muted light text');
+  assert(getComputedStyle(document.documentElement).backgroundColor === 'rgb(17, 17, 17)' &&
+    getComputedStyle(document.documentElement).color === 'rgb(237, 237, 237)', 'page uses compact charcoal and muted light text');
   assert(getComputedStyle(editor.getWrapperElement()).backgroundColor === 'rgb(29, 29, 29)' &&
     getComputedStyle(document.querySelector('.CodeMirror-gutters')).backgroundColor === 'rgb(29, 29, 29)', 'editor and line-number gutter use the dark surface');
-  assert(getComputedStyle(el('run-button')).backgroundColor === 'rgb(208, 208, 208)' &&
-    getComputedStyle(el('run-button')).color === 'rgb(27, 27, 27)' &&
-    getComputedStyle(el('live-workspace')).borderTopColor === 'rgb(88, 88, 88)', 'Run button and workspace border remain distinct');
+  assert(getComputedStyle(el('run-button')).backgroundColor === 'rgb(222, 222, 222)' &&
+    getComputedStyle(el('run-button')).color === 'rgb(23, 23, 23)' &&
+    getComputedStyle(el('live-workspace')).borderBottomColor === 'rgb(51, 51, 51)', 'Run button and workspace border remain distinct');
   assert(el('trace-content').textContent.includes('NO INSPECTION') && el('download-inspection').disabled && el('copy-inspection').disabled && !el('download-source').disabled, 'empty inspection is explained while source remains downloadable');
   assert(el('output-content').getAttribute('aria-live') === 'polite', 'execution output has a polite live announcement');
-  assert(document.querySelectorAll('[data-stage]').length === 7 && document.querySelectorAll('[data-tab]').length === 8, 'seven compact stages and eight result tabs are present');
+  assert(!document.querySelector('.pipeline-nav') && document.querySelectorAll('[data-tab]').length === 8, 'all eight inspection tabs remain without a duplicate pipeline strip');
+  assert(el('import-python-button') && el('editor-import-button') && el('import-python-input').accept.includes('.py') && el('export-menu') && el('snapshot-menu'), 'compact header exposes Python import, export and secondary snapshot tools');
+  assert(el('code-title').textContent.includes('main.py') && el('execution-status').textContent === 'READY' && !document.querySelector('.page-heading'), 'editor and result headers are compact and ready');
+  assert(document.querySelector('.status-bar a').href === 'https://github.com/tarun-choudhary-dev/compiler' && document.querySelector('.status-bar').textContent.includes('AGPL-3.0'), 'small footer links to the AGPL-3.0 project');
+  el('export-menu').open = true;
+  assert(el('download-source').textContent === 'Download Python' && el('download-inspection').disabled && el('copy-inspection').disabled, 'Export menu preserves actions and disables unavailable inspection');
   click('run-button');
   await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('output-content').textContent.includes('Hello, world!'), 'default execution result', 20000);
   assert(el('output-content').textContent === 'Hello, world!\n', 'Run executes and shows stdout in the existing result panel');
+  const pythonInput = el('import-python-input');
+  let pickerOpened = false;
+  const nativeInputClick = pythonInput.click;
+  pythonInput.click = () => { pickerOpened = true; };
+  click('import-python-button');
+  assert(pickerOpened, 'Import button opens the local Python file picker');
+  pythonInput.click = nativeInputClick;
+  const selectPython = (contents, name) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([contents], name, { type: 'text/x-python' }));
+    pythonInput.files = transfer.files;
+    pythonInput.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const runtimeModule = await import('../runtime/runtime.js');
+  const previousPythonRun = runtimeModule.PyodideRuntime.prototype.run;
+  let pythonImportRuns = 0;
+  runtimeModule.PyodideRuntime.prototype.run = function (...args) { pythonImportRuns++; return previousPythonRun.apply(this, args); };
+  selectPython('print("Imported locally")', 'example.py');
+  await until(() => el('import-status').textContent.includes('imported.'), 'Python file import', 2000);
+  assert(editor.getValue() === 'print("Imported locally")' && !el('import-status').hidden && el('output-empty').hidden === false && el('download-inspection').disabled && el('execution-status').textContent === 'READY' && pythonImportRuns === 0, 'imported Python replaces source without executing or retaining stale inspection');
+  selectPython('print("Invalid")', 'example.txt');
+  await until(() => el('import-status').textContent.includes('Only .py'), 'invalid Python file type', 2000);
+  assert(editor.getValue() === 'print("Imported locally")', 'invalid file type leaves source unchanged');
+  click('run-button');
+  await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('output-content').textContent === 'Imported locally\n', 'imported Python runs only on request', 20000);
+  assert(pythonImportRuns === 1, 'imported Python reaches Pyodide only after Run');
+  runtimeModule.PyodideRuntime.prototype.run = previousPythonRun;
+  assert(el('execution-status').textContent === 'READY', 'successful run returns the result header to READY');
   click('tab-tokens');
   assert(el('tab-tokens').getAttribute('aria-selected') === 'true' && !el('panel-tokens').hidden && el('tokens-body').children.length > 0, 'Tokens tab shows a structured table');
-  document.querySelector('[data-stage="ast"]').click();
-  assert(!el('panel-ast').hidden && el('ast-tree-content').textContent.startsWith('Module') && el('ast-dump-content').textContent.includes('Module('), 'AST stage opens both real representations');
-  document.querySelector('[data-stage="code-object"]').click();
-  assert(!el('panel-code-object').hidden && el('code-object-content').textContent.includes('co_filename: main.py'), 'Code object stage opens metadata');
-  document.querySelector('[data-stage="bytecode"]').click();
-  assert(!el('panel-bytecode').hidden && el('bytecode-content').textContent.includes('Offset'), 'Bytecode stage opens opcode table and raw bytes');
-  document.querySelector('[data-stage="disassembly"]').click();
-  assert(!el('panel-disassembly').hidden && el('disassembly-content').textContent.includes('LOAD_CONST'), 'Disassembly stage remains usable');
-  document.querySelector('[data-stage="source"]').click();
-  assert(editor.hasFocus(), 'Source stage returns keyboard focus to CodeMirror');
+  click('tab-ast');
+  assert(!el('panel-ast').hidden && el('ast-tree-content').textContent.startsWith('Module') && el('ast-dump-content').textContent.includes('Module('), 'AST tab opens both real representations');
+  click('tab-code-object');
+  assert(!el('panel-code-object').hidden && el('code-object-content').textContent.includes('co_filename: main.py'), 'Code object tab opens metadata');
+  click('tab-bytecode');
+  assert(!el('panel-bytecode').hidden && el('bytecode-content').textContent.includes('Offset'), 'Bytecode tab opens opcode table and raw bytes');
+  click('tab-disassembly');
+  assert(!el('panel-disassembly').hidden && el('disassembly-content').textContent.includes('LOAD_CONST'), 'Disassembly tab remains usable');
+  editor.focus();
+  assert(editor.hasFocus(), 'CodeMirror remains keyboard focusable');
   editor.setValue('print(');
   click('run-button');
   await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('errors-content').textContent.includes('SyntaxError'), 'syntax error result', 20000);
   click('tab-tokens');
   assert(el('tokens-warning').textContent.includes('SYNTAX ERROR') && el('tokens-body').children.length > 0, 'invalid source retains partial token table and warning');
+  assert(el('execution-status').textContent === 'ERROR', 'result header reports execution errors compactly');
   click('tab-ast');
   assert(el('ast-tree-content').textContent.startsWith('SYNTAX ERROR'), 'AST panel reports syntax error');
   click('tab-code-object');
@@ -54,7 +88,7 @@ export async function runUiTests() {
   click('tab-disassembly');
   assert(el('disassembly-content').textContent.startsWith('SYNTAX ERROR'), 'disassembly panel remains available on syntax error');
   editor.setValue('print("<img src=x>")');
-  document.querySelector('[data-stage="output"]').click();
+  click('tab-output'); click('run-button');
   await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('output-content').textContent.includes('<img src=x>'), 'pipeline Run result', 20000);
   assert(!el('panel-output').querySelector('img') && el('output-content').textContent === '<img src=x>\n', 'pipeline Run safely renders source output as text');
 
@@ -232,7 +266,7 @@ export async function runUiTests() {
     importFile('B', JSON.stringify(importedB), 'untrusted-b.json');
     await until(() => el('mode-compare').getAttribute('aria-pressed') === 'true' && !el('compare-content').hidden, 'comparison mode', 2000);
     assert(el('compare-meta-a').textContent.includes('untrusted-a.json') && el('compare-meta-b').textContent.includes('untrusted-b.json') && !el('compare-runtime-warning').hidden, 'two imported snapshots show side-by-side metadata and runtime warning');
-    assert(getComputedStyle(el('compare-workspace')).backgroundColor === 'rgb(32, 32, 32)' &&
+    assert(getComputedStyle(el('compare-workspace')).backgroundColor === 'rgb(24, 24, 24)' &&
       getComputedStyle(document.querySelector('.compare-row[data-status=CHANGED]')).backgroundColor === 'rgb(44, 44, 44)', 'comparison differences use a distinct charcoal surface');
     click('inspect-a');
     assert(readOnlyEditor.getValue() === importedA.source && el('mode-snapshot').getAttribute('aria-pressed') === 'true', 'comparison opens snapshot A for read-only inspection');
@@ -250,8 +284,14 @@ export async function runUiTests() {
     click('clear-a'); click('mode-live');
     assert(editor.getValue() === liveSource && el('output-content').textContent === liveOutput, 'clearing snapshots leaves live state untouched');
     click('run-button');
-    await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('execution-status').textContent.startsWith('Finished') && importedRuns === 1, 'live run after snapshot modes', 20000);
+    await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('execution-status').textContent === 'READY' && importedRuns === 1, 'live run after snapshot modes', 20000);
     assert(importedRuns === 1 && editor.getValue() === liveSource, 'live execution remains available after import and comparison');
+    editor.setValue('while True: pass');
+    click('run-button');
+    assert(el('execution-status').textContent === 'RUNNING' && !el('stop-button').hidden && el('run-button').hidden, 'running state swaps Run for Stop');
+    click('stop-button');
+    await until(() => el('runtime-status').textContent === 'PYTHON READY', 'Python ready after Stop', 20000);
+    assert(el('execution-status').textContent === 'STOPPED' && el('stop-button').hidden && !el('run-button').disabled, 'Stop terminates execution and restores Run');
   } finally { PyodideRuntime.prototype.run = originalRun; }
   return { passed: checks.length, checks };
 }

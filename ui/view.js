@@ -1,5 +1,3 @@
-import { formatDuration } from './results.js';
-
 export class PlaygroundView {
   constructor() {
     this.elements = Object.fromEntries(['run-button','stop-button','retry-button','runtime-status','runtime-dot','runtime-notice','python-version','execution-status','output-empty','output-content','tokens-warning','tokens-placeholder','tokens-table','tokens-body','ast-tree-content','ast-dump-content','code-object-content','bytecode-content','disassembly-content','errors-content','error-count','trace-content','clear-trace','download-source','download-inspection','copy-inspection','export-status'].map(id => [id, document.getElementById(id)]));
@@ -41,6 +39,7 @@ export class PlaygroundView {
   render(state) {
     const el = this.elements;
     el['run-button'].disabled = state.phase !== 'ready';
+    el['run-button'].hidden = state.phase === 'running';
     el['stop-button'].hidden = state.phase !== 'running';
     el['retry-button'].hidden = state.phase !== 'unavailable';
     el['runtime-status'].textContent = { loading: 'LOADING PYTHON…', ready: 'PYTHON READY', running: 'RUNNING PYTHON…', unavailable: 'PYTHON UNAVAILABLE' }[state.phase] || 'PYTHON UNAVAILABLE';
@@ -50,7 +49,10 @@ export class PlaygroundView {
     el['python-version'].textContent = state.version ? `PYTHON ${state.version}` : 'PYTHON';
     const problem = !!(state.error || state.stderr);
     el['error-count'].hidden = !problem;
-    el['execution-status'].textContent = state.phase === 'running' ? 'Executing…' : state.hasRun ? (state.dirty ? 'Source changed · run again' : state.error ? 'Execution stopped' : `Finished in ${formatDuration(state.duration)}`) : 'Ready when you are';
+    el['execution-status'].textContent = state.phase === 'running' ? 'RUNNING' :
+      state.phase === 'unavailable' ? 'ERROR' : state.phase === 'loading' ? 'LOADING' :
+      state.hasRun && !state.dirty && state.error ?
+        (state.error.startsWith('Execution stopped') ? 'STOPPED' : 'ERROR') : 'READY';
     el['output-empty'].hidden = state.hasRun;
     el['output-content'].hidden = !state.hasRun;
     el['output-content'].textContent = state.output + (state.truncated ? '\n[Output limit reached: further output omitted.]' : '') || (state.phase === 'running' ? 'Running…' : state.error ? 'No standard output. See Errors for details.' : 'Program finished without standard output.');

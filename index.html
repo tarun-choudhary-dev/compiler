@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Write and run Python in your browser. Explore real CPython bytecode and disassembly with PYLAB.">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://cdn.jsdelivr.net/pyodide/v0.29.3/full/; frame-src 'self' blob:; worker-src blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>PYLAB — Python playground</title>
+  <title>PYLAB.</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./vendor/codemirror/codemirror.css">
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./dark.css">
+  <link rel="stylesheet" href="./compact.css">
   <script defer src="./vendor/codemirror/codemirror.js"></script>
   <script defer src="./vendor/codemirror/python.js"></script>
   <script defer src="./vendor/codemirror/matchbrackets.js"></script>
@@ -18,56 +19,36 @@
 <body>
   <a class="skip-link" href="#main">Skip to playground</a>
   <header class="site-header">
-    <a class="wordmark" href="#playground" aria-label="PYLAB home"><span class="logo-mark" aria-hidden="true">&gt;_</span> PYLAB<span class="logo-dot">.</span></a>
-    <button id="menu-toggle" class="menu-toggle" type="button" aria-expanded="false" aria-controls="navigation">Menu <span aria-hidden="true">☰</span></button>
-    <nav id="navigation" aria-label="Main navigation">
-      <a href="#playground" aria-current="page">Playground</a>
-      <a href="#how-it-works">How it works</a>
-      <a href="#about">About</a>
-    </nav>
-    <span class="header-note">A little closer to Python.</span>
+    <a class="wordmark" href="#main" aria-label="PYLAB home">PYLAB<span class="logo-dot">.</span></a>
+    <div class="header-controls">
+      <button id="import-python-button" class="header-button" type="button" aria-label="Import Python file">IMPORT</button>
+      <input id="import-python-input" class="sr-only" type="file" accept=".py,text/x-python" aria-label="Select a Python file to import">
+      <details id="export-menu" class="header-menu"><summary aria-label="Export options">EXPORT <span aria-hidden="true">▾</span></summary>
+        <div class="export-toolbar" aria-label="Downloads and inspection copy"><button id="download-source" type="button">Download Python</button><button id="download-inspection" type="button" disabled>Download inspection</button><button id="copy-inspection" type="button" disabled>Copy inspection</button><span id="export-status" role="status" aria-live="polite"></span></div>
+      </details>
+      <button id="stop-button" class="secondary-button" type="button" hidden>■ STOP</button>
+      <button id="run-button" class="run-button" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title="Run Python (Ctrl/Cmd + Enter)" disabled>▶ RUN</button>
+      <details id="snapshot-menu" class="header-menu secondary-menu"><summary aria-label="Snapshot and comparison tools">⋯</summary>
+        <div class="snapshot-toolbar" aria-label="Workspace modes and snapshot files">
+          <div class="mode-switch" role="group" aria-label="Workspace mode"><button id="mode-live" type="button" aria-pressed="true">Live</button><button id="mode-snapshot" type="button" aria-pressed="false">Snapshot</button><button id="mode-compare" type="button" aria-pressed="false">Compare</button></div>
+          <div class="snapshot-actions"><label class="snapshot-import">Import snapshot A <input id="import-a" type="file" accept=".json,application/json" aria-label="Import snapshot A"></label><button id="clear-a" type="button">Clear A</button><label class="snapshot-import">Import snapshot B <input id="import-b" type="file" accept=".json,application/json" aria-label="Import snapshot B"></label><button id="clear-b" type="button">Clear B</button></div>
+          <p id="snapshot-status" class="snapshot-status" role="status" aria-live="polite"></p>
+        </div>
+      </details>
+    </div>
   </header>
 
   <main id="main">
-    <section id="playground" class="page" aria-labelledby="playground-title">
-      <div class="page-heading">
-        <div><p class="eyebrow">WRITE. RUN. UNDERSTAND.</p><h1 id="playground-title">Python playground<span>.</span></h1></div>
-        <p class="heading-note">A small workspace for your code.<br>A closer look at how it runs.</p>
-      </div>
-      <div class="snapshot-toolbar" aria-label="Workspace modes and snapshot files">
-        <div class="mode-switch" role="group" aria-label="Workspace mode">
-          <button id="mode-live" type="button" aria-pressed="true">Live</button>
-          <button id="mode-snapshot" type="button" aria-pressed="false">Snapshot</button>
-          <button id="mode-compare" type="button" aria-pressed="false">Compare</button>
-        </div>
-        <div class="snapshot-actions">
-          <label class="snapshot-import">Import snapshot A <input id="import-a" type="file" accept=".json,application/json" aria-label="Import snapshot A"></label>
-          <button id="clear-a" type="button">Clear A</button>
-          <label class="snapshot-import">Import snapshot B <input id="import-b" type="file" accept=".json,application/json" aria-label="Import snapshot B"></label>
-          <button id="clear-b" type="button">Clear B</button>
-        </div>
-      </div>
-      <p id="snapshot-status" class="snapshot-status" role="status" aria-live="polite"></p>
-      <nav class="pipeline-nav" aria-label="Python compilation pipeline">
-        <span class="pipeline-label">THE PIPELINE</span>
-        <div class="pipeline-stages">
-          <button type="button" data-stage="source" aria-current="step">Source</button>
-          <button type="button" data-stage="tokens">Tokens</button>
-          <button type="button" data-stage="ast">AST</button>
-          <button type="button" data-stage="code-object">Code object</button>
-          <button type="button" data-stage="bytecode">Bytecode</button>
-          <button type="button" data-stage="disassembly">Disassembly</button>
-          <button type="button" data-stage="output" aria-label="Run code and show output">Run</button>
-        </div>
-      </nav>
+    <section id="playground" class="page" aria-label="Python playground">
+      <p id="import-status" class="import-status" role="status" aria-live="polite" hidden></p>
       <div id="live-workspace" class="workspace">
         <section class="editor-pane" aria-labelledby="code-title">
-          <div class="pane-toolbar"><h2 id="code-title"><span class="section-number">01</span> Source code</h2><span class="file-label">main.py</span></div>
+          <div class="pane-toolbar"><h2 id="code-title"><span class="section-number">01</span> main.py</h2><button id="editor-import-button" class="pane-action" type="button" aria-label="Import Python file into editor">IMPORT</button></div>
           <div id="editor-host"><label class="sr-only" for="source">Python source code</label><textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off">print("Hello, world!")</textarea></div>
-          <div class="editor-footer"><span id="cursor-position">Ln 1, Col 1</span><span>Python <span class="separator">/</span> 4 spaces</span></div>
+          <div class="editor-footer"><span id="cursor-position">Ln 1, Col 1</span><span><span id="python-version">PYTHON</span> <span class="separator">·</span> 4 spaces</span></div>
         </section>
         <section id="inspection-pane" class="result-pane" aria-labelledby="result-title">
-          <div class="pane-toolbar"><h2 id="result-title"><span class="section-number">02</span> Result</h2><span id="execution-status" class="execution-status" role="status">Ready when you are</span></div>
+          <div class="pane-toolbar"><h2 id="result-title"><span class="section-number">02</span> Result</h2><div class="result-state"><span id="execution-status" class="execution-status" role="status">LOADING</span><span id="runtime-dot" class="status-dot" aria-hidden="true"></span><span id="runtime-status" class="sr-only" role="status">LOADING PYTHON…</span><button id="retry-button" type="button" class="text-button" hidden>Retry</button></div></div>
           <div class="result-tabs" role="tablist" aria-label="Execution results">
             <button id="tab-trace" role="tab" aria-selected="false" aria-controls="panel-trace" data-tab="trace" tabindex="-1">Trace</button>
             <button id="tab-output" role="tab" aria-selected="true" aria-controls="panel-output" data-tab="output" tabindex="0">Output</button>
@@ -80,7 +61,7 @@
           </div>
           <div class="result-panels">
             <div id="panel-trace" role="tabpanel" aria-labelledby="tab-trace" tabindex="0" hidden><div class="trace-heading"><div><p class="panel-label">SOURCE TRACE</p><p class="panel-description">Select source, an AST node, or an instruction to follow CPython's available locations.</p></div><button id="clear-trace" class="text-button" type="button" hidden>Clear</button></div><div id="trace-content" class="trace-content" aria-live="polite">Run your code, then place the cursor on a source line.</div></div>
-            <div id="panel-output" role="tabpanel" aria-labelledby="tab-output" tabindex="0"><div id="output-empty" class="empty-state"><span class="empty-glyph" aria-hidden="true">&gt;_</span><h3>Let’s run some Python.</h3><p>Your program’s output will appear here.</p><span class="empty-shortcut">Write a little. See what happens.</span></div><pre id="output-content" hidden></pre></div>
+            <div id="panel-output" role="tabpanel" aria-labelledby="tab-output" tabindex="0"><div id="output-empty" class="empty-state"><h3>NO OUTPUT</h3><p>Run the program to see its output.</p></div><pre id="output-content" hidden></pre></div>
             <div id="panel-tokens" role="tabpanel" aria-labelledby="tab-tokens" tabindex="0" hidden><p class="panel-label">PYTHON TOKENS</p><p class="panel-description">The lexical pieces found by Python’s <code>tokenize</code> module. Lines and columns start at 1.</p><p id="tokens-warning" class="inspection-warning" hidden></p><p id="tokens-placeholder" class="inspection-placeholder">Run your code to inspect its tokens.</p><table id="tokens-table" class="tokens-table" hidden><thead><tr><th scope="col">Type</th><th scope="col">Value</th><th scope="col">Line</th><th scope="col">Column</th></tr></thead><tbody id="tokens-body"></tbody></table></div>
             <div id="panel-ast" role="tabpanel" aria-labelledby="tab-ast" tabindex="0" hidden><p class="panel-label">PYTHON ABSTRACT SYNTAX TREE</p><p class="panel-description">The structure returned by Python’s <code>ast.parse()</code>. Operators and contexts are nodes too.</p><p class="inspection-subheading">AST TREE</p><pre id="ast-tree-content">Run your code to inspect its AST.</pre><details class="ast-dump"><summary>Show ast.dump(…, indent=2)</summary><pre id="ast-dump-content"></pre></details></div>
             <div id="panel-code-object" role="tabpanel" aria-labelledby="tab-code-object" tabindex="0" hidden><p class="panel-label">CPYTHON CODE OBJECT</p><p class="panel-description"><code>compile()</code> converts Python source into a CPython code object containing executable bytecode and metadata.</p><pre id="code-object-content">Run your code to inspect its code object.</pre></div>
@@ -89,10 +70,7 @@
             <div id="panel-errors" role="tabpanel" aria-labelledby="tab-errors" tabindex="0" hidden><p class="panel-label">ERRORS &amp; STDERR</p><pre id="errors-content">No errors to show.</pre></div>
           </div>
         </section>
-        <div class="run-toolbar"><div class="runtime-indicator"><span id="runtime-dot" class="status-dot" aria-hidden="true"></span><span id="runtime-status" role="status">LOADING PYTHON…</span><button id="retry-button" type="button" class="text-button" hidden>Retry</button></div><div class="run-actions"><span class="keyboard-hint"><kbd id="modifier-key">Ctrl</kbd> + <kbd>Enter</kbd> to run</span><button id="stop-button" class="secondary-button" type="button" hidden>Stop</button><button id="run-button" class="run-button" type="button" disabled><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M4 2.5v11L13 8z"/></svg>Run code</button></div></div>
       </div>
-      <div class="workspace-caption"><span>Source → tokens → AST → code object → bytecode → execution.</span><a href="#how-it-works">Under the hood <span aria-hidden="true">↗</span></a></div>
-      <div class="export-toolbar" aria-label="Downloads and inspection copy"><button id="download-source" type="button">Download source</button><button id="download-inspection" type="button" disabled>Download inspection</button><button id="copy-inspection" type="button" disabled>Copy inspection</button><span id="export-status" role="status" aria-live="polite"></span></div>
       <p id="runtime-notice" class="runtime-notice" role="status" hidden></p>
       <div id="snapshot-workspace" class="workspace" hidden>
         <section class="editor-pane" aria-labelledby="snapshot-source-title">
@@ -119,24 +97,7 @@
       <noscript><p class="runtime-notice">Enable JavaScript to edit and execute Python in your browser.</p></noscript>
     </section>
 
-    <section id="how-it-works" class="page reading-page" aria-labelledby="how-title" hidden>
-      <p class="eyebrow">UNDER THE HOOD</p><h1 id="how-title">From source to execution<span>.</span></h1>
-      <p class="lead">Real Python. Running right here in your browser.</p>
-      <article><h2>A Python runtime, delivered to your browser.</h2><p>Pyodide brings CPython, the reference implementation of Python, to the browser by compiling it to WebAssembly. The runtime loads once, then your code executes locally in a worker.</p><ol class="pipeline"><li>Python source</li><li>Pyodide</li><li>CPython as WebAssembly</li><li>Browser execution</li></ol></article>
-      <article><h2>Your source takes a different journey.</h2><p>Python’s tokenizer identifies names, operators, strings and other tokens. Its parser builds an abstract syntax tree (AST). <code>compile()</code> turns the source into a code object with bytecode, which the Python virtual machine executes inside the WebAssembly runtime. Your source is not compiled directly into WebAssembly or native machine code.</p><ol class="pipeline detailed"><li>Source code</li><li>Tokens</li><li>AST</li><li>Code object</li><li>Bytecode</li><li>Python virtual machine</li><li>Execution</li></ol></article>
-      <article class="explanation-grid"><div><h2>Tokens and AST</h2><p>The Tokens tab reports actual <code>tokenize</code> output with positions. The AST tab shows the tree returned by <code>ast.parse()</code>, plus an optional full dump. Incomplete source can still yield partial tokens even when parsing fails.</p></div><div><h2>Code object and bytecode</h2><p>Inspect constants, names, local variables, stack size and flags from <code>compile()</code>. The Bytecode tab pairs decoded instructions with raw <code>co_code</code> bytes. Nested functions and classes have their own code objects.</p></div></article>
-      <article><h2>Disassembly</h2><p>Python’s <code>dis</code> module turns bytecode into readable operations, including nested code. Offsets, operation names and arguments describe CPython bytecode, not native processor instructions. Details vary by Python version.</p></article>
-      <article><h2>A small, local workspace.</h2><p>Each run starts with a fresh global namespace. Output and errors are captured separately. Stop ends the worker and resets Python. A 15-second execution limit and output limits keep everyday experiments manageable.</p><p>There is no interactive input or package installation in this version. Most of the bundled Python standard library is available. Runtime downloads need an internet connection; running your source does not use an execution API.</p></article>
-      <a class="back-link" href="#playground">← Back to the playground</a>
-    </section>
-
-    <section id="about" class="page reading-page about-page" aria-labelledby="about-title" hidden>
-      <p class="eyebrow">A TOOL FOR CURIOSITY</p><h1 id="about-title">Meet Python, a little deeper<span>.</span></h1>
-      <p class="lead">PYLAB is a browser-based workspace for experimenting with Python execution and understanding its bytecode.</p>
-      <article><p>Write a few lines. Run them. Look at what CPython compiled. The editor, output, and inspection tools sit together so you can move between an idea and its implementation.</p><p>Built with CodeMirror and Pyodide. No accounts, no execution server, and no setup to start experimenting.</p><p>Your source stays in this page and its isolated runtime. The runtime receives no page APIs, and network requests from the execution environment are blocked. This is a learning tool, not a general-purpose hostile-code security sandbox.</p></article>
-      <a class="back-link" href="#playground">← Open the playground</a>
-    </section>
   </main>
-  <footer class="status-bar"><div><span id="python-version">PYTHON</span><span>WASM</span><span>LOCAL EXECUTION</span></div><span>Your code runs locally in your browser.</span></footer>
+  <footer class="status-bar"><span>© 2026 Tarun Choudhary · AGPL-3.0 · <a href="https://github.com/tarun-choudhary-dev/compiler" target="_blank" rel="noopener noreferrer">GitHub</a></span></footer>
 </body>
 </html>

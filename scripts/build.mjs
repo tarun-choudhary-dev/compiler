@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, 'dist');
 await mkdir(output, { recursive: true });
-for (const file of ['index.html', 'style.css', 'dark.css', 'app.js', 'controller.js', 'favicon.svg', 'LICENSE', 'THIRD_PARTY.md']) {
+for (const file of ['index.html', 'style.css', 'dark.css', 'compact.css', 'app.js', 'controller.js', 'favicon.svg', 'LICENSE', 'THIRD_PARTY.md']) {
   await copyFile(resolve(root, file), resolve(output, file));
 }
 for (const directory of ['editor', 'runtime', 'ui', 'vendor']) {

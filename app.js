@@ -6,6 +6,7 @@ import { canCreateSnapshot, createSnapshot, serializeSnapshot, downloadText } fr
 import { readSnapshotFile } from './ui/snapshot-validator.js';
 import { SnapshotSession } from './ui/snapshot-session.js';
 import { ComparisonView, renderSnapshotMetadata } from './ui/snapshot-view.js';
+import { readPythonFile } from './ui/python-import.js';
 
 const state = createState();
 const view = new PlaygroundView();
@@ -13,6 +14,7 @@ const comparison = new ComparisonView();
 const slots = { A: null, B: null };
 const importGeneration = { A: 0, B: 0 };
 let controller, editor, snapshotEditor, snapshotSession, mode = 'live', activeSlot = 'A';
+let pythonImportGeneration = 0;
 const byId = id => document.getElementById(id);
 const liveView = { render: current => { if (mode === 'live') view.render(current); } };
 const currentState = () => mode === 'snapshot' && snapshotSession ? snapshotSession.state : state;
@@ -22,12 +24,11 @@ function showMode(next) {
   if (next === 'snapshot' && !slots[activeSlot]) activeSlot = slots.A ? 'A' : 'B';
   if (next === 'snapshot' && !slots[activeSlot]) next = 'live';
   mode = next;
+  document.body.dataset.mode = mode;
   byId('live-workspace').hidden = mode !== 'live';
   byId('snapshot-workspace').hidden = mode !== 'snapshot';
   byId('compare-workspace').hidden = mode !== 'compare';
-  document.querySelector('.pipeline-nav').hidden = mode !== 'live';
-  document.querySelector('.workspace-caption').hidden = mode !== 'live';
-  document.querySelector('.export-toolbar').hidden = mode !== 'live';
+  byId('export-menu').hidden = mode !== 'live';
   byId('runtime-notice').hidden = mode !== 'live' || !state.notice;
   for (const name of ['live','snapshot','compare']) byId(`mode-${name}`).setAttribute('aria-pressed', String(mode === name));
   byId('mode-snapshot').disabled = !slots.A && !slots.B;
@@ -43,11 +44,10 @@ function showMode(next) {
     snapshotEditor.refresh(); snapshotSession.render();
     renderSnapshotMetadata(byId('snapshot-metadata'), `SNAPSHOT ${activeSlot}`, slots[activeSlot].name, slots[activeSlot].snapshot);
   } else {
-    byId('live-workspace').insertBefore(pane, document.querySelector('.run-toolbar'));
+    byId('live-workspace').append(pane);
     if (mode === 'live') { view.render(state); editor?.refresh(); }
     else { comparison.render(slots.A, slots.B); byId('python-version').textContent = 'PYTHON'; }
   }
-  document.querySelector('.status-bar>span').textContent = mode === 'live' ? 'Your code runs locally in your browser.' : 'Imported snapshots are read-only data. No Python is executed.';
 }
 
 async function importSnapshot(slot, file) {
@@ -98,25 +98,6 @@ for (const tab of comparison.tabs) {
   });
 }
 
-function navigate() {
-  const route = ['playground', 'how-it-works', 'about'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'playground';
-  for (const page of document.querySelectorAll('.page')) page.hidden = page.id !== route;
-  for (const link of document.querySelectorAll('#navigation a')) {
-    if (link.hash === `#${route}`) link.setAttribute('aria-current', 'page');
-    else link.removeAttribute('aria-current');
-  }
-  document.getElementById('navigation').classList.remove('open');
-  document.getElementById('menu-toggle').setAttribute('aria-expanded', 'false');
-  if (route === 'playground') { editor?.refresh(); if (mode === 'snapshot') snapshotEditor?.refresh(); }
-  document.title = `PYLAB — ${{ playground: 'Python playground', 'how-it-works': 'How it works', about: 'About' }[route]}`;
-}
-
-document.getElementById('menu-toggle').addEventListener('click', event => {
-  const open = document.getElementById('navigation').classList.toggle('open');
-  event.currentTarget.setAttribute('aria-expanded', String(open));
-});
-window.addEventListener('hashchange', navigate);
-
 for (const tab of view.tabs) {
   tab.addEventListener('click', () => { const current = currentState(); current.activeTab = tab.dataset.tab; current.activeStage = current.activeTab; view.selectTab(current.activeTab); view.selectStage(current.activeStage); });
   tab.addEventListener('keydown', event => {
@@ -131,28 +112,9 @@ for (const tab of view.tabs) {
   });
 }
 
-for (const stage of view.stages) {
-  stage.addEventListener('click', () => {
-    if (mode !== 'live') return;
-    const name = stage.dataset.stage;
-    if (name === 'source') {
-      state.activeStage = 'source';
-      view.selectStage('source');
-      editor?.view.focus();
-    } else if (name === 'output' && state.phase === 'ready') {
-      controller?.run();
-    } else {
-      state.activeTab = name;
-      state.activeStage = name;
-      view.selectTab(name);
-      view.selectStage(name);
-    }
-  });
-}
-
 try {
   editor = new PythonEditor(document.getElementById('source'), {
-    onRun: () => controller?.run(), onChange: () => { controller?.changed(); document.getElementById('export-status').textContent = ''; },
+    onRun: () => controller?.run(), onChange: () => { controller?.changed(); byId('export-status').textContent = ''; byId('import-status').hidden = true; },
     onCursor: (line, column) => { document.getElementById('cursor-position').textContent = `Ln ${line}, Col ${column}`; controller?.selectSource(); },
   });
   controller = new PythonController({ editor, state, view: liveView });
@@ -172,6 +134,30 @@ try {
     else if (token) selection?.selectToken(Number(token.dataset.tokenIndex));
   });
   document.getElementById('clear-trace').addEventListener('click', () => currentSelection()?.clearSelection());
+  const pythonInput = byId('import-python-input');
+  for (const id of ['import-python-button', 'editor-import-button'])
+    byId(id).addEventListener('click', () => pythonInput.click());
+  pythonInput.addEventListener('change', async event => {
+    const file = event.currentTarget.files?.[0]; event.currentTarget.value = '';
+    if (!file) return;
+    const generation = ++pythonImportGeneration;
+    const status = byId('import-status');
+    status.hidden = false;
+    status.textContent = 'IMPORTING PYTHON…';
+    try {
+      const source = await readPythonFile(file);
+      if (generation !== pythonImportGeneration) return;
+      showMode('live');
+      controller.replaceSource(source);
+      editor.view.focus();
+      exportStatus.textContent = '';
+      status.hidden = false;
+      status.textContent = `${file.name.slice(0, 120)} imported. Run to inspect.`;
+    } catch (error) {
+      if (generation !== pythonImportGeneration) return;
+      status.textContent = error instanceof Error ? error.message : 'Python file could not be read.';
+    }
+  });
   const exportStatus = document.getElementById('export-status');
   document.getElementById('download-source').addEventListener('click', () => {
     downloadText('program.py', editor.getValue(), 'text/x-python;charset=utf-8');
@@ -201,9 +187,8 @@ try {
   document.getElementById('run-button').addEventListener('click', () => controller.run());
   document.getElementById('stop-button').addEventListener('click', () => controller.stop());
   document.getElementById('retry-button').addEventListener('click', () => controller.initialize());
-  if (/Mac|iPhone|iPad/.test(navigator.platform)) document.getElementById('modifier-key').textContent = '⌘';
   window.addEventListener('keydown', event => {
-    if (mode === 'live' && (event.ctrlKey || event.metaKey) && event.key === 'Enter' && !document.getElementById('playground').hidden) { event.preventDefault(); controller.run(); }
+    if (mode === 'live' && (event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); controller.run(); }
   });
   window.addEventListener('pagehide', () => controller.dispose());
   window.addEventListener('pageshow', event => { if (event.persisted) controller.initialize(); });
@@ -214,4 +199,3 @@ try {
   state.notice = error instanceof Error ? error.message : 'The playground could not start. Refresh the page to try again.';
   view.render(state);
 }
-navigate();

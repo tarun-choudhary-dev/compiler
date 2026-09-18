@@ -17,15 +17,15 @@ node scripts/serve.mjs
 Open **http://127.0.0.1:4173**. This development utility only serves files using GET/HEAD. It is not an application backend and does not receive or execute Python. No `npm install` is needed.
 
 1. Wait for **PYTHON READY** (the first download can take a little while).
-2. Run `print("Hello, world!")` with **Run code** or **Ctrl/Cmd + Enter**.
-3. Switch between **Output**, **Trace**, **Tokens**, **AST**, **Code object**, **Bytecode**, **Disassembly**, and **Errors**. The compact pipeline opens each stage; **Source** focuses the editor and **Run** executes the current source.
-4. Use **Stop** to terminate a long-running program and restart Python. Code remains in the editor.
+2. Run `print("Hello, world!")` with **RUN** or **Ctrl/Cmd + Enter**. **STOP** terminates a running worker.
+3. Use **IMPORT** to load a local `.py` file into the editor. Import never runs it; press **RUN** when ready. Files over 100,000 source characters are rejected.
+4. Switch between **Output**, **Trace**, **Tokens**, **AST**, **Code object**, **Bytecode**, **Disassembly**, and **Errors** in the result panel.
 
 After running, place the cursor on a source line to see its tokens, AST constructs, code-object contexts and instructions in **Trace**. Select an AST node or an instruction in Bytecode/Disassembly to jump to its source range. **Clear** removes the trace highlight. Editing the source invalidates the mapping until the next run.
 
-The AST tree and token table are interactive too. Select a node to inspect its fields and children, or select a token to inspect its value and start/end positions. The Trace tab shows the related items found from CPython's locations. **Download source** saves the current editor text as `program.py`. After a completed run, **Download inspection** saves a versioned JSON snapshot as `pylab-inspection.json`; **Copy inspection** copies that JSON when the browser permits clipboard access. A source edit disables inspection export until you run again.
+The AST tree and token table are interactive too. Select a node to inspect its fields and children, or select a token to inspect its value and start/end positions. The Trace tab shows the related items found from CPython's locations. **EXPORT ▾ → Download Python** saves the current editor text as `program.py`. After a completed run, **Download inspection** saves a versioned JSON snapshot as `pylab-inspection.json`; **Copy inspection** copies that JSON when the browser permits clipboard access. A source edit or import disables inspection export until you run again.
 
-Use **Import snapshot A** to open a previously exported file in **Snapshot** mode. Its source appears in a separate read-only editor and its inspections use the same result tabs and Trace view. **Live** returns to your editable source and last live execution without replacing either. Import **snapshot B** and choose **Compare** to inspect source, token, AST, code-object, instruction, disassembly and execution differences. Clear A/B independently. Imports and comparisons are in-memory browser operations; neither runs Python.
+The secondary **⋯** menu contains Live, Snapshot, and Compare controls. Use **Import snapshot A** to open a previously exported file in **Snapshot** mode. Its source appears in a separate read-only editor and its inspections use the same result tabs and Trace view. **Live** returns to your editable source and last live execution without replacing either. Import **snapshot B** and choose **Compare** to inspect source, token, AST, code-object, instruction, disassembly and execution differences. Clear A/B independently. Imports and comparisons are in-memory browser operations; neither runs Python.
 
 Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the editor and focuses the result tabs. Arrow keys, Home, and End navigate tabs.
 
@@ -40,9 +40,10 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 ├── LICENSE                  # Existing project license (AGPL-3.0)
 ├── README.md
 ├── THIRD_PARTY.md
-├── index.html               # Accessible app shell, result panels, reading pages
+├── index.html               # Compact accessible app shell and result panels
 ├── style.css                # Monochrome responsive layout
 ├── dark.css                 # Soft charcoal palette and component states
+├── compact.css              # Viewport-filling tool layout and compact controls
 ├── favicon.svg
 ├── app.js                   # App wiring, navigation, keyboard controls
 ├── controller.js            # Run lifecycle, timeout, Stop/retry, stale-run guard
@@ -62,6 +63,7 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 │   ├── view.js              # Text-only rendering and tab state
 │   ├── source-map.js        # Normalized ranges and cached relationships
 │   ├── snapshot.js          # Versioned JSON inspection and browser downloads
+│   ├── python-import.js     # Local .py validation and source-size bounds
 │   ├── snapshot-validator.js # Import schema, size and depth validation
 │   ├── snapshot-session.js   # Read-only inspection state and selection
 │   ├── compare.js            # Pure serialized-data comparison
@@ -83,7 +85,7 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
     └── ui-harness.js        # Tests the real editor and pipeline controls
 ```
 
-`node scripts/build.mjs` generates `dist/` containing the public entry files, both stylesheets, `editor/`, `runtime/`, `ui/`, `vendor/`, license notices, and `.nojekyll`. `dist/` is ignored by Git. No server entry point is generated. `dark.css` applies the charcoal theme across Live, Snapshot, Compare, and the reading pages without changing execution behavior.
+`node scripts/build.mjs` generates `dist/` containing the public entry files, all three stylesheets, `editor/`, `runtime/`, `ui/`, `vendor/`, license notices, and `.nojekyll`. `dist/` is ignored by Git. No server entry point is generated. `dark.css` supplies the charcoal theme; `compact.css` keeps the editor and result panels prominent across desktop and mobile.
 
 `ui/source-map.js` normalizes source positions, caches line lookups, and resolves source/token/AST/instruction selections. `ui/snapshot.js` packages a completed run for browser-only export. `ui/snapshot-validator.js` gates untrusted import before any view state changes; `ui/compare.js` operates on validated JSON data only. `ui/snapshot-session.js` and `ui/snapshot-view.js` provide read-only selection and comparison rendering. `runtime/inspector.py` provides CPython metadata; `controller.js`, `editor/editor.js`, and `ui/view.js` handle live selection state, marks, and rendering. The imported view shares `ui/view.js` and has its own read-only editor.
 

@@ -19,6 +19,21 @@ export class PythonController {
     this.clearSelection(false);
     if (this.state.hasRun) { this.state.dirty = true; this.view.render(this.state); }
   }
+  replaceSource(source) {
+    if (this.state.phase === 'running') this.stop();
+    this.editor.setValue(source);
+    this.editor.clearError();
+    this.clearSelection(false);
+    Object.assign(this.state, {
+      activeTab: 'output', activeStage: 'source', output: '', stderr: '', error: '',
+      tokens: [], tokenError: '', tokensTruncated: false, astTree: '', astDump: '',
+      astError: '', compileError: '', codeObject: '', bytecode: '', disassembly: '',
+      traceData: null, trace: null, truncated: false, hasRun: false, dirty: false,
+      notice: '', duration: 0,
+    });
+    this.sourceAtRun = undefined;
+    this.view.render(this.state);
+  }
   clearSelection(render = true) {
     this.state.selection = null;
     this.editor.clearTrace?.();

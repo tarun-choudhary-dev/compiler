@@ -7,6 +7,30 @@ import { createTrace, rangeContains, rangeOverlap, rangeEqual, rangeIntersection
 import { canCreateSnapshot, createSnapshot, serializeSnapshot, SNAPSHOT_VERSION, MAX_SNAPSHOT_BYTES } from '../ui/snapshot.js';
 import { parseSnapshotText, readSnapshotFile, validateSnapshot } from '../ui/snapshot-validator.js';
 import { compareSnapshots } from '../ui/compare.js';
+import { readPythonFile, MAX_PYTHON_FILE_BYTES } from '../ui/python-import.js';
+
+test('local Python import accepts .py and enforces file type and source bounds', async () => {
+  const file = (name, content, size = content.length) => ({ name, size, text: async () => content });
+  assert.equal(await readPythonFile(file('example.PY', 'print(1)')), 'print(1)');
+  await assert.rejects(readPythonFile(file('example.txt', 'print(1)')), /Only \.py/);
+  await assert.rejects(readPythonFile(file('large.py', '', MAX_PYTHON_FILE_BYTES + 1)), /too large/);
+  await assert.rejects(readPythonFile(file('wide.py', 'x'.repeat(100_001), 100_001)), /too large/);
+});
+
+test('replacing source clears previous inspection without starting Python', () => {
+  let source = 'print(1)', runs = 0;
+  const state = createState(); state.phase = 'ready'; state.hasRun = true;
+  state.output = '1\n'; state.bytecode = 'stale'; state.trace = {};
+  const editor = { setValue: value => { source = value; }, getValue: () => source,
+    clearError() {}, clearTrace() {} };
+  const control = new PythonController({ state, editor, view: { render() {} } });
+  control.runtime = { run: () => { runs++; }, dispose() {} };
+  control.replaceSource('print(2)');
+  assert.equal(source, 'print(2)'); assert.equal(runs, 0);
+  assert.equal(state.hasRun, false); assert.equal(state.output, '');
+  assert.equal(state.bytecode, ''); assert.equal(state.trace, null);
+  assert.equal(control.sourceAtRun, undefined);
+});
 
 test('malformed runtime payloads cannot become accidental UI strings', () => {
   const result = processResult({ stdout: {}, stderr: null, bytecode: undefined, duration: NaN, errorLine: '10' });
