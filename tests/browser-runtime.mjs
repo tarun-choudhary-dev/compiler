@@ -71,4 +71,17 @@ try {
   const uiResult = await command('Runtime.evaluate', { expression: `import(${JSON.stringify(new URL('ui-harness.js', url).href)}).then(module => module.runUiTests())`, awaitPromise: true, returnByValue: true, timeout: 240000 });
   if (uiResult.error || uiResult.result?.exceptionDetails) throw new Error(JSON.stringify(uiResult.error || uiResult.result.exceptionDetails));
   console.log(JSON.stringify({ ui: uiResult.result.result.value }, null, 2));
+  await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  const mobile = await command('Runtime.evaluate', { expression: `(() => {
+    const menu = document.getElementById('menu-toggle');
+    const visible = getComputedStyle(menu).display !== 'none';
+    menu.click();
+    return { width: innerWidth, visible, expanded: menu.getAttribute('aria-expanded'),
+      stacked: getComputedStyle(document.querySelector('.workspace')).gridTemplateColumns.split(' ').length === 1,
+      noPageOverflow: document.documentElement.scrollWidth <= innerWidth,
+      editorUsable: !!document.querySelector('.CodeMirror').CodeMirror };
+  })()`, returnByValue: true });
+  const checks = mobile.result?.result?.value;
+  if (mobile.error || !checks || checks.width !== 390 || !checks.visible || checks.expanded !== 'true' || !checks.stacked || !checks.noPageOverflow || !checks.editorUsable) throw new Error(`Mobile layout failed: ${JSON.stringify(checks || mobile)}`);
+  console.log(JSON.stringify({ mobile: { passed: 6, checks } }, null, 2));
 } finally { socket?.close(); chrome.kill(); server.close(); }

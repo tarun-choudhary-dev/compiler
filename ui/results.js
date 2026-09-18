@@ -7,6 +7,8 @@ export function processResult(message) {
     type: safeText(item.type).slice(0, 32), value: safeText(item.value).slice(0, 1000),
     line: Number.isSafeInteger(item.line) && item.line >= 0 ? item.line : 0,
     column: Number.isSafeInteger(item.column) && item.column >= 0 ? item.column : 0,
+    ...(Number.isSafeInteger(item.endLine) && Number.isSafeInteger(item.endColumn) ?
+      { endLine: item.endLine, endColumn: item.endColumn } : {}),
   })) : [];
   return {
     output: safeText(message.stdout), stderr: safeText(message.stderr),
@@ -18,6 +20,7 @@ export function processResult(message) {
     disassembly: safeText(message.disassembly), truncated: message.truncated === true,
     duration: Number.isFinite(message.duration) ? Math.max(0, message.duration) : 0,
     errorLine: Number.isInteger(message.errorLine) ? message.errorLine : 0,
+    traceData: message.trace && typeof message.trace === 'object' ? message.trace : null,
   };
 }
 

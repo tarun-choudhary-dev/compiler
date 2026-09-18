@@ -61,9 +61,17 @@ for (const stage of view.stages) {
 try {
   editor = new PythonEditor(document.getElementById('source'), {
     onRun: () => controller?.run(), onChange: () => controller?.changed(),
-    onCursor: (line, column) => { document.getElementById('cursor-position').textContent = `Ln ${line}, Col ${column}`; },
+    onCursor: (line, column) => { document.getElementById('cursor-position').textContent = `Ln ${line}, Col ${column}`; controller?.selectSource(); },
   });
   controller = new PythonController({ editor, state, view });
+  document.getElementById('editor-host').addEventListener('click', () => controller.selectSource());
+  document.querySelector('.result-panels').addEventListener('click', event => {
+    const ast = event.target.closest('[data-ast-id]');
+    const instruction = event.target.closest('[data-instruction-id]');
+    if (ast) controller.selectAst(ast.dataset.astId);
+    else if (instruction) controller.selectInstruction(instruction.dataset.instructionId);
+  });
+  document.getElementById('clear-trace').addEventListener('click', () => controller.clearSelection());
   document.getElementById('run-button').addEventListener('click', () => controller.run());
   document.getElementById('stop-button').addEventListener('click', () => controller.stop());
   document.getElementById('retry-button').addEventListener('click', () => controller.initialize());

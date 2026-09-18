@@ -18,8 +18,10 @@ Open **http://127.0.0.1:4173**. This development utility only serves files using
 
 1. Wait for **PYTHON READY** (the first download can take a little while).
 2. Run `print("Hello, world!")` with **Run code** or **Ctrl/Cmd + Enter**.
-3. Switch between **Output**, **Tokens**, **AST**, **Code object**, **Bytecode**, **Disassembly**, and **Errors**. The compact pipeline opens each stage; **Source** focuses the editor and **Run** executes the current source.
+3. Switch between **Output**, **Trace**, **Tokens**, **AST**, **Code object**, **Bytecode**, **Disassembly**, and **Errors**. The compact pipeline opens each stage; **Source** focuses the editor and **Run** executes the current source.
 4. Use **Stop** to terminate a long-running program and restart Python. Code remains in the editor.
+
+After running, place the cursor on a source line to see its tokens, AST constructs, code-object contexts and instructions in **Trace**. Select an AST node or an instruction in Bytecode/Disassembly to jump to its source range. **Clear** removes the trace highlight. Editing the source invalidates the mapping until the next run.
 
 Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the editor and focuses the result tabs. Arrow keys, Home, and End navigate tabs.
 
@@ -72,6 +74,8 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 
 `node scripts/build.mjs` generates `dist/` containing the public entry files, `editor/`, `runtime/`, `ui/`, `vendor/`, license notices, and `.nojekyll`. `dist/` is ignored by Git. No server entry point is generated.
 
+Phase 3 adds `ui/source-map.js` alongside the listed UI modules. It normalizes source positions, caches line lookups, and resolves source/AST/instruction selections. `runtime/inspector.py` provides the CPython location metadata; `controller.js`, `editor/editor.js`, and `ui/view.js` handle selection state, marks, and rendering.
+
 ## How execution works
 
 ```text
@@ -86,7 +90,7 @@ An iframe with `sandbox="allow-scripts"` (without `allow-same-origin`) creates a
 
 Each program is compiled as `main.py` and executed with a fresh globals dictionary. Standard streams are captured separately, including Unicode, whitespace, and text without a final newline. Python exceptions become readable tracebacks; syntax and runtime errors point to the relevant editor line. A source edit during execution does not incorrectly highlight a line in the edited version.
 
-The worker returns **one result** per run containing structured tokens, AST tree and dump, code-object metadata, formatted bytecode, disassembly, stdout, stderr and errors. The page validates and bounds that result. All source-derived values enter the UI as text, including token table cells; no Python output is interpreted as HTML. The inspector and program run in the same worker, never on the main UI thread.
+The worker returns **one result** per run containing structured tokens, AST nodes, code objects and instructions with source locations, the existing formatted inspection text, stdout, stderr and errors. The page validates and bounds that result. All source-derived values enter the UI as text, including clickable rows; no Python output is interpreted as HTML. The inspector and program run in the same worker, never on the main UI thread.
 
 Fresh globals are not a fresh interpreter: imported modules, changes to built-ins, and Pyodide's ephemeral in-memory filesystem can survive ordinary runs. A worker reset/page reload clears the interpreter. This is a script playground, not a persistent REPL.
 
@@ -135,13 +139,19 @@ Python source → tokens → AST → code object → Python bytecode
 
 The reported Python version comes from the running interpreter, not a hard-coded UI label. Instructions and bytecode formats are version-specific.
 
+## Source mapping
+
+PYLAB retains token start/end positions, AST `lineno`/`col_offset`/`end_lineno`/`end_col_offset`, and `dis.Instruction.positions` from compiled CPython code objects. The Python inspector serializes these values with stable AST IDs and distinct IDs for nested code objects. It does not change the AST or pass raw Python objects through `postMessage`. The browser normalizes ranges, caches line relationships for the current run, and uses CodeMirror marks to highlight source. AST and instruction columns are UTF-8 byte offsets; token columns count Python characters; CodeMirror uses UTF-16 offsets. The conversion handles non-ASCII identifiers and strings.
+
+The **Trace** tab gives line-based relationships when a source line is selected. A more precise source region, AST node or instruction uses available ranges to narrow candidates. The AST list, bytecode list and disassembly list can jump back to source; the original text tree, raw bytes and `dis.dis` listing remain in disclosures. Syntax errors still leave partial tokens while later stages show as unavailable. The mapping is not always one-to-one: a statement can generate many instructions, multiple constructs can share a location, and some instructions have missing or only line-level metadata. PYLAB displays missing locations explicitly rather than inventing an exact association. The trace describes compiler metadata, not a step-by-step execution history.
+
 ## Isolation and limits
 
 - The runtime iframe has an opaque origin and no same-origin access to the app. Its blob worker inherits a CSP with `connect-src 'none'` and no external script sources.
 - Runtime assets are downloaded by the host before execution. The worker's replacement `fetch` only resolves a fixed in-memory asset map; it has no network fallback. CSP independently blocks network through other APIs.
 - Pyodide's `jsglobals` is an empty, frozen object. No DOM, fetch, clipboard, camera, microphone, geolocation, or host filesystem APIs are supplied to Python. The public `pyodide_js` bridge is unregistered.
 - The page accepts only execution messages over a dedicated MessageChannel. It never evaluates result strings or inserts them as HTML.
-- Only one execution can run at once. Programs have a 15-second wall-time limit. Output is limited to 100,000 characters; source to 100,000 characters. Token display stops after 1,500 entries, the AST tree after 500 nodes, and nested code inspection after 40 code objects or 12 levels. Inspection text is also bounded and reports omissions where appropriate.
+- Only one execution can run at once. Programs have a 15-second wall-time limit. Output is limited to 100,000 characters; source to 100,000 characters. Token display stops after 1,500 entries, AST at 500 nodes, nested code inspection at 40 code objects or 12 levels, and structured instructions at 4,000 entries. Inspection text is also bounded and reports omissions where appropriate.
 - Browsers do not provide a portable hard memory quota for workers. Extreme allocation can still exhaust a tab before the watchdog can recover it. Pyodide and Python introspection are not, by themselves, a hostile-code sandbox. Keep this deployment on a dedicated origin without sensitive same-origin services, and do not weaken the iframe sandbox or CSP.
 - Python's in-memory virtual filesystem exists as part of CPython/Pyodide; this app does not expose or mount the user's real filesystem.
 
@@ -199,10 +209,10 @@ node tests/browser-runtime.mjs
 
 The second command starts a temporary static file server and an isolated headless Chromium profile, then runs production Pyodide inside the real sandbox/worker. Set `CHROME_PATH` if Chrome/Edge is not at a detected path. Runtime download access is required. The fixture is excluded from `dist/`.
 
-The integration suite covers actual output, no-newline Unicode, stderr, exception types and lines, all inspection stages, nested functions/classes, loops, imports, Unicode identifiers and strings, syntax errors, fresh globals, bridge restrictions, output limits, and terminating/restarting an infinite loop. It also loads the actual app page to test CodeMirror, tabs, clickable stages, error states and text-only rendering. Unit tests cover empty source, stale/duplicate runs, structured result validation, size limits and clearing old inspection results.
+The integration suite covers actual output, no-newline Unicode, stderr, exception types and lines, all inspection stages, nested functions/classes, loops, imports, Unicode identifiers and strings, syntax errors, fresh globals, bridge restrictions, output limits, and terminating/restarting an infinite loop. It also checks real CPython positions and the actual app page's source, AST and instruction selection paths. Unit tests cover empty source, stale/duplicate runs, structured result validation, range operations, Unicode column conversion, missing locations, size limits and clearing old inspection results.
 
 For release QA, also check current Firefox and Safari, mobile touch editing, keyboard/screen-reader navigation, slow or blocked runtime downloads, long lines, and 200% text enlargement. Browser rendering and accessibility require their own manual review; automated runtime checks do not establish those properties.
 
 ## What to build next
 
-Next, connect source ranges to AST nodes and bytecode instructions so selecting a line highlights its corresponding compilation stages. Add explicit downloadable source/inspection results once that mapping is clear. Keep multi-file workspaces, REPL state, packages and additional language runtimes behind separate adapters so the current execution path remains small.
+Next, add a small AST/token detail view that can compare related constructs without losing the current selection, and offer downloadable source/inspection results. Keep multi-file workspaces, REPL state, packages and additional language runtimes behind separate adapters so the current execution path remains small.

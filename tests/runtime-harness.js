@@ -91,6 +91,27 @@ export async function runRuntimeTests() {
     r = await run('a = 1\n'.repeat(600));
     assert(r.tokens.length === 1500 && r.tokensTruncated, 'large token streams are bounded');
 
+    r = await run('x = 10\ny = 20\nz = x + y\nprint(z)');
+    assert(r.tokens.find(t => t.value === '10').endLine === 1 && r.tokens.find(t => t.value === '10').endColumn === 7, 'token end positions are retained');
+    assert(r.trace.astNodes.some(n => n.type === 'BinOp' && n.lineno === 3 && n.col_offset === 4 && n.end_lineno === 3 && n.end_col_offset === 9), 'AST nodes retain CPython source byte ranges');
+    assert(r.trace.astNodes.every((n, index) => n.id === `ast-${index}`) && r.trace.astNodes.length <= 500, 'AST node IDs remain stable and bounded');
+    assert(r.trace.codeObjects[0].name === '<module>' && r.trace.instructions.some(i => i.opcode === 'BINARY_OP' && i.source?.line === 3), 'compiled instructions retain code object and source positions');
+    assert([1,2,3,4].every(line => r.trace.instructions.some(i => i.source?.line === line)), 'four source statements have separately traceable instructions');
+    assert(r.trace.instructions.filter(i => i.source?.line === 3).length > 1, 'multiple instructions legitimately share one source line');
+    assert(r.trace.instructions.every(i => i.source === null || Number.isInteger(i.source.line)), 'missing instruction locations are explicitly null');
+    r = await run('def add(a, b):\n    return a + b\nresult = add(2, 3)\nprint(result)');
+    const functionCode = r.trace.codeObjects.find(c => c.name === 'add');
+    assert(functionCode?.parentId === 'co-0' && r.trace.instructions.some(i => i.codeId === functionCode.id && i.source?.line === 2 && i.opcode === 'BINARY_OP'), 'function instructions retain distinct nested code context');
+    r = await run('for i in range(5):\n    if i % 2 == 0:\n        print(i)');
+    assert(r.trace.astNodes.some(n => n.type === 'For') && r.trace.astNodes.some(n => n.type === 'If') && r.trace.instructions.filter(i => i.source?.line === 2).length > 1, 'loops and conditions map many instructions to a line');
+    r = await run('def hello(');
+    assert(r.tokens.length > 0 && r.trace.astNodes.length === 0 && r.trace.instructions.length === 0 && r.error.includes('SyntaxError'), 'invalid syntax preserves token ranges but no later mappings');
+    r = await run('café = "🙂"\nprint(café)');
+    assert(r.trace.astNodes.some(n => n.type === 'Constant' && n.lineno === 1 && n.col_offset === 8 && n.end_col_offset === 14) &&
+      r.trace.instructions.some(i => i.opcode === 'LOAD_CONST' && i.source?.column === 8 && i.source?.endColumn === 14), 'real Unicode AST and instruction columns use UTF-8 byte offsets');
+    r = await run('a = 1\n'.repeat(600));
+    assert(r.trace.astNodes.length <= 500 && r.trace.codeObjects.length <= 40 && r.trace.instructions.length <= 4000, 'long source respects all inspection mapping bounds');
+
     return { passed: checks.length, existing: phaseOneCount, new: checks.length - phaseOneCount, checks, version: info.version };
   } finally { runtime.dispose(); }
 }

@@ -40,6 +40,8 @@ def _pylab_make_runner():
                     "value": item.string[:1000],
                     "line": item.start[0],
                     "column": item.start[1] + 1,
+                    "endLine": item.end[0],
+                    "endColumn": item.end[1] + 1,
                 })
         except (tokenize.TokenError, IndentationError) as error:
             warning = f"SYNTAX ERROR — tokenization stopped: {error}"
@@ -48,6 +50,7 @@ def _pylab_make_runner():
     def inspect_ast(root):
         text = LimitedText()
         remaining = 500
+        nodes = []
 
         def label(node):
             name = type(node).__name__
@@ -65,6 +68,16 @@ def _pylab_make_runner():
             if remaining <= 0:
                 return
             remaining -= 1
+            node_id = f"ast-{len(nodes)}"
+            nodes.append({
+                "id": node_id, "parentId": node_parents[-1] if node_parents else None,
+                "depth": len(node_parents), "type": type(node).__name__, "label": label(node),
+                "lineno": getattr(node, "lineno", None),
+                "col_offset": getattr(node, "col_offset", None),
+                "end_lineno": getattr(node, "end_lineno", None),
+                "end_col_offset": getattr(node, "end_col_offset", None),
+            })
+            node_parents.append(node_id)
             text.write(("" if root else prefix + ("└── " if last else "├── ")) + label(node) + "\n")
             children = list(ast.iter_child_nodes(node))
             child_prefix = prefix + ("    " if last else "│   ") if not root else ""
@@ -73,9 +86,46 @@ def _pylab_make_runner():
                     text.write(child_prefix + "└── [Further AST nodes omitted]\n")
                     break
                 visit(child, child_prefix, index == len(children) - 1, False)
+            node_parents.pop()
+
+        node_parents = []
+        visit(root)
+        return text.getvalue(), nodes
+
+    def inspect_locations(root):
+        """Serializable CPython positions, including explicit missing locations."""
+        objects, mapped = [], []
+        truncated = False
+
+        def visit(code, parent_id=None, depth=0):
+            nonlocal truncated
+            if len(objects) >= 40 or depth > 12:
+                truncated = True
+                return
+            code_id = f"co-{len(objects)}"
+            objects.append({"id": code_id, "parentId": parent_id,
+                            "name": code.co_name, "firstLine": code.co_firstlineno,
+                            "depth": depth})
+            for instruction in instructions(code, show_caches=False, adaptive=False):
+                if len(mapped) >= 4000:
+                    truncated = True
+                    break
+                position = instruction.positions
+                source = None
+                if position is not None and position.lineno is not None:
+                    source = {"line": position.lineno, "column": position.col_offset,
+                              "endLine": position.end_lineno, "endColumn": position.end_col_offset}
+                mapped.append({"id": f"{code_id}:{instruction.offset}",
+                               "codeId": code_id, "offset": instruction.offset,
+                               "opcode": instruction.opname, "arg": instruction.arg,
+                               "argrepr": instruction.argrepr[:200], "source": source})
+            for value in code.co_consts:
+                if isinstance(value, code_type):
+                    visit(value, code_id, depth + 1)
 
         visit(root)
-        return text.getvalue()
+        return {"codeObjects": objects, "instructions": mapped,
+                "instructionsTruncated": truncated}
 
     def describe(root):
         text = LimitedText()
@@ -155,6 +205,8 @@ def _pylab_make_runner():
             "astTree": "", "astDump": "", "astError": "", "compileError": "",
             "codeObject": "", "bytecode": "", "disassembly": "",
             "error": "", "errorLine": 0,
+            "trace": {"astNodes": [], "codeObjects": [], "instructions": [],
+                      "instructionsTruncated": False},
         }
         # Restore standard streams and built-in module registrations between runs.
         sys.stdout, sys.stderr, sys.stdin = original_stdout, original_stderr, original_stdin
@@ -167,9 +219,10 @@ def _pylab_make_runner():
                 result['astError'] = f"SYNTAX ERROR\n{error.__class__.__name__}: {error.msg} (line {error.lineno or '?'})"
                 result['compileError'] = result['astError'] + "\nNo code object or bytecode was produced."
                 raise
-            result['astTree'] = inspect_ast(tree)
+            result['astTree'], result['trace']['astNodes'] = inspect_ast(tree)
             result['astDump'] = ast.dump(tree, indent=2)[:limit]
             code = compile_source(source, 'main.py', 'exec', dont_inherit=True, optimize=0)
+            result['trace'].update(inspect_locations(code))
             result['codeObject'] = describe(code)
             result['bytecode'] = inspect_bytecode(code)
             listing = LimitedText()
