@@ -1,17 +1,17 @@
 /** CodeMirror is vendored so the editor is usable even when the runtime CDN fails. */
 export class PythonEditor {
-  constructor(textarea, { onRun, onChange, onCursor }) {
+  constructor(textarea, { onRun, onChange, onCursor, readOnly = false }) {
     this.errorLine = null;
     this.traceLine = null;
     this.traceMark = null;
     if (!window.CodeMirror) throw new Error('The editor could not load. Check that vendor/codemirror is present.');
     this.view = window.CodeMirror.fromTextArea(textarea, {
-      mode: { name: 'python', version: 3 }, lineNumbers: true,
+      mode: { name: 'python', version: 3 }, lineNumbers: true, readOnly,
       indentUnit: 4, tabSize: 4, indentWithTabs: false, matchBrackets: true,
       lineWrapping: false, viewportMargin: 20, inputStyle: 'contenteditable',
       screenReaderLabel: 'Python source code',
       extraKeys: {
-        'Ctrl-Enter': onRun, 'Cmd-Enter': onRun,
+        'Ctrl-Enter': () => { if (!readOnly) onRun(); }, 'Cmd-Enter': () => { if (!readOnly) onRun(); },
         Tab: cm => cm.somethingSelected() ? cm.indentSelection('add') : cm.replaceSelection(' '.repeat(4 - cm.getCursor().ch % 4)),
         'Shift-Tab': cm => cm.indentSelection('subtract'),
         // Keep a keyboard route out of the editor even though Tab indents.
@@ -22,6 +22,7 @@ export class PythonEditor {
     this.view.on('cursorActivity', () => { const p = this.view.getCursor(); onCursor(p.line + 1, p.ch + 1); });
   }
   getValue() { return this.view.getValue(); }
+  setValue(value) { this.view.setValue(value); }
   refresh() { this.view.refresh(); }
   clearError() { if (this.errorLine !== null) this.view.removeLineClass(this.errorLine, 'background', 'editor-error-line'); this.errorLine = null; }
   clearTrace() {

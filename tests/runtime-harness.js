@@ -101,6 +101,7 @@ export async function runRuntimeTests() {
     assert(r.trace.instructions.every(i => i.source === null || Number.isInteger(i.source.line)), 'missing instruction locations are explicitly null');
     r = await run('def add(a, b):\n    return a + b\nresult = add(2, 3)\nprint(result)');
     const functionCode = r.trace.codeObjects.find(c => c.name === 'add');
+    assert(functionCode?.argcount === 2 && Number.isInteger(functionCode.stacksize) && Number.isInteger(functionCode.bytecodeLength) && Array.isArray(functionCode.constants) && Array.isArray(functionCode.varnames), 'structured code-object comparison metadata comes from CPython');
     assert(functionCode?.parentId === 'co-0' && r.trace.instructions.some(i => i.codeId === functionCode.id && i.source?.line === 2 && i.opcode === 'BINARY_OP'), 'function instructions retain distinct nested code context');
     r = await run('for i in range(5):\n    if i % 2 == 0:\n        print(i)');
     assert(r.trace.astNodes.some(n => n.type === 'For') && r.trace.astNodes.some(n => n.type === 'If') && r.trace.instructions.filter(i => i.source?.line === 2).length > 1, 'loops and conditions map many instructions to a line');

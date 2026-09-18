@@ -15,6 +15,7 @@ export function createSnapshot(state, sourceAtRun) {
     throw new Error('Run the current source before exporting its inspection.');
   return {
     version: SNAPSHOT_VERSION,
+    createdAt: new Date().toISOString(),
     runtime: { name: 'Pyodide', version: PYODIDE_VERSION, pythonVersion: state.version || null },
     source: sourceAtRun,
     inspection: {

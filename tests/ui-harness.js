@@ -126,6 +126,7 @@ export async function runUiTests() {
   [...el('ast-node-list').querySelectorAll('[data-ast-id]')].find(row => row.textContent.startsWith('BinOp')).click();
   assert(el('trace-content').textContent.includes('LOAD_NAME') && el('trace-content').textContent.includes('LOAD_CONST') && el('trace-content').textContent.includes('BINARY_OP'), 'AST range reveals multiple actual bytecode instructions');
 
+  let exportedSnapshot;
   const nativeCreateUrl = URL.createObjectURL, nativeAnchorClick = HTMLAnchorElement.prototype.click;
   const downloads = [];
   URL.createObjectURL = blob => { downloads.push({ blob }); return `blob:pylab-test-${downloads.length}`; };
@@ -136,6 +137,7 @@ export async function runUiTests() {
     assert(!el('download-inspection').disabled, 'completed inspection enables snapshot export');
     click('download-inspection');
     const snapshot = JSON.parse(await downloads.at(-1).blob.text());
+    exportedSnapshot = snapshot;
     assert(downloads.at(-1).filename === 'pylab-inspection.json' && snapshot.version === 1 && snapshot.source === editor.getValue(), 'inspection download uses a versioned JSON file');
     assert(snapshot.runtime.pythonVersion === el('python-version').textContent.replace('PYTHON ', '') && snapshot.runtime.version === '0.29.3' && snapshot.inspection.ast.nodes.some(node => node.type === 'BinOp') && snapshot.inspection.instructions.length > 0 && snapshot.mappings.instructions.length > 0 && snapshot.execution.stdout === '50\n', 'snapshot contains runtime, AST, instructions, mappings and execution');
     const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
@@ -172,5 +174,74 @@ export async function runUiTests() {
   editor.setValue('a = 1\n'.repeat(600)); click('run-button');
   await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('tokens-body').children.length === 1500, 'large inspection render', 20000);
   assert(el('ast-node-list').children.length <= 500 && el('bytecode-instructions').querySelectorAll('[data-instruction-id]').length <= 4000, 'large inspection UI respects node and instruction bounds');
+  const { PyodideRuntime } = await import('../runtime/runtime.js');
+  const originalRun = PyodideRuntime.prototype.run;
+  let importedRuns = 0;
+  PyodideRuntime.prototype.run = function (...args) { importedRuns++; return originalRun.apply(this, args); };
+  const importFile = (slot, contents, name = `${slot}.json`) => {
+    const input = el(`import-${slot.toLowerCase()}`), transfer = new DataTransfer();
+    transfer.items.add(new File([contents], name, { type: 'application/json' }));
+    input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  try {
+    const liveSource = editor.getValue(), liveOutput = el('output-content').textContent;
+    importFile('A', '{', 'broken.json');
+    await until(() => el('snapshot-status').textContent.includes('INVALID SNAPSHOT'), 'invalid snapshot status', 2000);
+    assert(el('snapshot-status').textContent.includes('Invalid JSON') && el('mode-live').getAttribute('aria-pressed') === 'true', 'invalid JSON is rejected without changing the live workspace');
+    const importedA = structuredClone(exportedSnapshot);
+    importedA.source = '1 / 0 \n1 / 0    \n1 / 0   ';
+    importedA.inspection.ast.tree = '<img src=x onerror=alert(1)>';
+    importedA.execution.stdout = '<svg onload=alert(1)>';
+    importFile('A', JSON.stringify(importedA), 'untrusted-a.json');
+    await until(() => el('mode-snapshot').getAttribute('aria-pressed') === 'true' || el('snapshot-status').textContent.includes('INVALID SNAPSHOT'), 'snapshot mode', 2000);
+    if (el('snapshot-status').textContent.includes('INVALID SNAPSHOT')) throw new Error(el('snapshot-status').textContent);
+    const readOnlyEditor = el('snapshot-editor-host').querySelector('.CodeMirror').CodeMirror;
+    assert(readOnlyEditor.getOption('readOnly') === true && readOnlyEditor.getValue() === importedA.source && el('snapshot-metadata').textContent.includes('READ ONLY'), 'imported source opens in a separate read-only CodeMirror');
+    importFile('A', '{ "version": 2 }', 'wrong-version.json');
+    await until(() => el('snapshot-status').textContent.includes('INVALID SNAPSHOT'), 'invalid replacement status', 2000);
+    assert(readOnlyEditor.getValue() === importedA.source && el('mode-snapshot').getAttribute('aria-pressed') === 'true', 'invalid replacement preserves the previously loaded snapshot');
+    assert(editor.getValue() === liveSource && importedRuns === 0 && el('live-workspace').hidden, 'import never replaces live source or sends imported Python to Pyodide');
+    assert(el('snapshot-metadata').textContent.includes('0.29.3') && el('snapshot-metadata').textContent.includes('Schema') && el('snapshot-metadata').textContent.includes('Created'), 'snapshot metadata uses recorded schema, runtime and creation time');
+    click('tab-output');
+    assert(el('output-content').textContent === '<svg onload=alert(1)>' && !el('inspection-pane').querySelector('svg'), 'imported execution text renders without creating HTML elements');
+    click('tab-ast');
+    assert(el('ast-tree-content').textContent.includes('<img') && !el('inspection-pane').querySelector('img'), 'HTML-like AST text is inert');
+    assert(el('tokens-body').children.length > 0 && el('ast-node-list').children.length > 0 && el('bytecode-instructions').children.length > 0, 'snapshot mode reuses token, AST and instruction views');
+    [...el('ast-node-list').querySelectorAll('[data-ast-id]')].find(row => row.textContent.startsWith('BinOp')).click();
+    assert(readOnlyEditor.getSelection().length > 0 && importedRuns === 0, 'snapshot AST selection traces source without execution');
+    click('mode-live');
+    assert(editor.getValue() === liveSource && el('output-content').textContent === liveOutput && el('mode-live').getAttribute('aria-pressed') === 'true', 'returning to live restores its editor and execution result');
+    click('mode-snapshot');
+    assert(el('snapshot-source').readOnly && readOnlyEditor.getValue() === importedA.source, 'snapshot mode remains read-only when revisited');
+    const importedB = structuredClone(importedA);
+    importedB.source = '2 / 0 \n2 / 0    \n2 / 0   ';
+    importedB.runtime.pythonVersion = '3.14.0';
+    importedB.inspection.tokens[0].value = 'changed';
+    importedB.inspection.ast.nodes.find(node => node.fields.length).fields[0].value = 'changed';
+    importedB.inspection.codeObjects[0].constants = ['changed'];
+    importedB.inspection.instructions[0].argrepr = 'changed';
+    window.__pylabTestSnapshots = [JSON.stringify(importedA), JSON.stringify(importedB)];
+    importFile('B', JSON.stringify(importedB), 'untrusted-b.json');
+    await until(() => el('mode-compare').getAttribute('aria-pressed') === 'true' && !el('compare-content').hidden, 'comparison mode', 2000);
+    assert(el('compare-meta-a').textContent.includes('untrusted-a.json') && el('compare-meta-b').textContent.includes('untrusted-b.json') && !el('compare-runtime-warning').hidden, 'two imported snapshots show side-by-side metadata and runtime warning');
+    click('inspect-a');
+    assert(readOnlyEditor.getValue() === importedA.source && el('mode-snapshot').getAttribute('aria-pressed') === 'true', 'comparison opens snapshot A for read-only inspection');
+    click('mode-compare'); click('inspect-b');
+    assert(readOnlyEditor.getValue() === importedB.source && el('mode-snapshot').getAttribute('aria-pressed') === 'true', 'comparison opens snapshot B for read-only inspection');
+    click('mode-compare');
+    assert(el('compare-summary').textContent.includes('SOURCE') && el('compare-summary').textContent.includes('AST') && el('compare-summary').textContent.includes('BYTECODE'), 'comparison summary covers pipeline categories');
+    for (const category of ['source','tokens','ast','code-object','bytecode','disassembly','execution']) {
+      document.querySelector(`[data-compare="${category}"]`).click();
+      assert(document.querySelector(`[data-compare="${category}"]`).getAttribute('aria-selected') === 'true' && el('compare-rows').children.length > 1, `${category} comparison is keyboard-accessible and populated`);
+    }
+    assert(importedRuns === 0, 'two-snapshot comparison never executes either Python source');
+    click('clear-b');
+    assert(!el('compare-empty').hidden && el('compare-content').hidden, 'clearing B produces a clear empty comparison');
+    click('clear-a'); click('mode-live');
+    assert(editor.getValue() === liveSource && el('output-content').textContent === liveOutput, 'clearing snapshots leaves live state untouched');
+    click('run-button');
+    await until(() => el('runtime-status').textContent === 'PYTHON READY' && el('execution-status').textContent.startsWith('Finished') && importedRuns === 1, 'live run after snapshot modes', 20000);
+    assert(importedRuns === 1 && editor.getValue() === liveSource, 'live execution remains available after import and comparison');
+  } finally { PyodideRuntime.prototype.run = originalRun; }
   return { passed: checks.length, checks };
 }

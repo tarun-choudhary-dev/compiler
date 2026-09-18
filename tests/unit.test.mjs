@@ -5,6 +5,8 @@ import { PythonController } from '../controller.js';
 import { createState } from '../ui/state.js';
 import { createTrace, rangeContains, rangeOverlap, rangeEqual, rangeIntersection, lineMatches, smallestContaining } from '../ui/source-map.js';
 import { canCreateSnapshot, createSnapshot, serializeSnapshot, SNAPSHOT_VERSION, MAX_SNAPSHOT_BYTES } from '../ui/snapshot.js';
+import { parseSnapshotText, readSnapshotFile, validateSnapshot } from '../ui/snapshot-validator.js';
+import { compareSnapshots } from '../ui/compare.js';
 
 test('malformed runtime payloads cannot become accidental UI strings', () => {
   const result = processResult({ stdout: {}, stderr: null, bytecode: undefined, duration: NaN, errorLine: '10' });
@@ -192,4 +194,130 @@ test('multi-line source selection returns tokens on every overlapping line', () 
   const trace = createTrace({}, 'x\ny', tokens);
   const selection = trace.selection(1, { start: { line: 1, column: 0 }, end: { line: 2, column: 1 } });
   assert.deepEqual(selection.tokenIndices, [0, 1]);
+});
+
+function phaseFiveFixture(number = 10) {
+  const source = `x = ${number}\nprint(x)`;
+  const tokens = [{ type: 'NUMBER', value: String(number), line: 1, column: 5, endLine: 1, endColumn: 5 + String(number).length }];
+  const state = createState();
+  Object.assign(state, { phase: 'ready', hasRun: true, version: '3.13.2', output: `${number}\n`, tokens,
+    astTree: 'Module', astDump: 'Module(body=...)', codeObject: 'code object', bytecode: 'bytes', disassembly: 'dis',
+    trace: createTrace({ astNodes: [{ type: 'Constant', lineno: 1, col_offset: 4, end_lineno: 1,
+      end_col_offset: 4 + String(number).length, fields: [{ name: 'value', value: String(number) }] }],
+    codeObjects: [{ name: '<module>', firstLine: 1, argcount: 0, nlocals: 0, stacksize: 2, flags: 0,
+      bytecodeLength: 8, constants: [String(number)], names: ['x'], varnames: [] }],
+    instructions: [{ codeId: 'co-0', offset: 2, opcode: 'LOAD_CONST', arg: 0, argrepr: String(number),
+      source: { line: 1, column: 4, endLine: 1, endColumn: 4 + String(number).length } }] }, source, tokens),
+  });
+  return createSnapshot(state, source);
+}
+
+test('version-one snapshots validate, including older exports without optional metadata', () => {
+  const fixture = phaseFiveFixture();
+  assert.deepEqual(parseSnapshotText(serializeSnapshot(fixture)), fixture);
+  const old = structuredClone(fixture); delete old.createdAt;
+  for (const key of ['argcount','nlocals','stacksize','flags','bytecodeLength','constants','names','varnames','metadataTruncated']) delete old.inspection.codeObjects[0][key];
+  assert.equal(validateSnapshot(old).version, 1);
+});
+test('malformed JSON and unknown or incompatible schema versions are rejected', () => {
+  assert.throws(() => parseSnapshotText('{'), /Invalid JSON/);
+  for (const version of [0, 2, '1', null]) {
+    const record = phaseFiveFixture(); record.version = version;
+    assert.throws(() => validateSnapshot(record), /Unsupported snapshot version/);
+  }
+});
+test('missing required fields, wrong types and invalid nested inspection references are rejected', () => {
+  const a = phaseFiveFixture(); delete a.inspection; assert.throws(() => validateSnapshot(a), /inspection must be an object/);
+  const b = phaseFiveFixture(); b.inspection.tokens = {}; assert.throws(() => validateSnapshot(b), /must be an array/);
+  const c = phaseFiveFixture(); c.inspection.instructions[0].codeId = 'co-999'; assert.throws(() => validateSnapshot(c), /unknown code object/);
+  const d = phaseFiveFixture(); d.mappings.astNodes[0].id = 'ast-4'; assert.throws(() => validateSnapshot(d), /does not match|is invalid/);
+  const e = phaseFiveFixture(); e.mappings.instructions[0].source.end.column = 99;
+  assert.throws(() => validateSnapshot(e), /outside the recorded source/);
+  const f = phaseFiveFixture(); f.mappings.instructions[0].source.start.column = 3;
+  assert.throws(() => validateSnapshot(f), /do not match the recorded inspection locations/);
+});
+test('oversized files are rejected before reading and oversized or deep JSON is rejected', async () => {
+  let read = false;
+  await assert.rejects(readSnapshotFile({ size: MAX_SNAPSHOT_BYTES + 1, text: async () => { read = true; return ''; } }), /5 MB/);
+  assert.equal(read, false);
+  assert.throws(() => parseSnapshotText(' '.repeat(MAX_SNAPSHOT_BYTES + 1)), /5 MB/);
+  const deep = phaseFiveFixture(); deep.untrusted = {}; let p = deep.untrusted;
+  for (let i = 0; i < 30; i++) p = p.child = {};
+  assert.throws(() => validateSnapshot(deep), /nesting/);
+  const many = phaseFiveFixture(); many.inspection.tokens = Array(1501).fill(many.inspection.tokens[0]);
+  assert.throws(() => validateSnapshot(many), /1500-item limit/);
+});
+test('HTML and JavaScript-like strings remain inert serialized data', () => {
+  const record = phaseFiveFixture();
+  record.source = '<script>globalThis.compromised=true</script>\n__import__("os").system("echo x")';
+  record.inspection.ast.tree = '<img src=x onerror=alert(1)>';
+  record.execution.stdout = '<svg onload=alert(1)>';
+  const imported = parseSnapshotText(JSON.stringify(record));
+  assert.equal(imported.source, record.source);
+  assert.equal(globalThis.compromised, undefined);
+});
+test('large valid snapshots remain within the import bounds', () => {
+  const record = phaseFiveFixture(); record.source = 'x = 10\n'.repeat(10_000);
+  assert.equal(parseSnapshotText(JSON.stringify(record)).source.length, 70_000);
+});
+test('source, tokens, AST, code-object, bytecode and disassembly comparisons use structured data', () => {
+  const a = phaseFiveFixture(10), b = phaseFiveFixture(20);
+  const result = compareSnapshots(a, b);
+  for (const category of ['source','tokens','ast','code-object','bytecode','disassembly','execution']) assert(result.summary[category] > 0, category);
+  assert(result.categories.tokens.some(item => item.before.includes('10') && item.after.includes('20')));
+  assert(result.categories.ast.some(item => item.before.includes('10') && item.after.includes('20')));
+  assert(result.categories.bytecode.some(item => item.before.includes('LOAD_CONST') && item.after.includes('LOAD_CONST')));
+  assert.equal(result.categories.bytecode, result.categories.disassembly);
+});
+test('token position-only changes are distinguished from value changes', () => {
+  const a = phaseFiveFixture(), b = phaseFiveFixture();
+  b.inspection.tokens[0].column = 6;
+  const item = compareSnapshots(a, b).categories.tokens[0];
+  assert.equal(item.status, 'CHANGED'); assert.equal(item.detail, 'position only');
+});
+test('line and token insertions and removals are explicitly marked', () => {
+  const a = phaseFiveFixture(), b = phaseFiveFixture();
+  a.source = 'first\nlast'; b.source = 'first\ninserted\nlast';
+  const added = compareSnapshots(a, b).categories.source;
+  assert(added.some(item => item.status === 'ADDED' && item.after === 'inserted'));
+  assert(compareSnapshots(b, a).categories.source.some(item => item.status === 'REMOVED' && item.before === 'inserted'));
+  b.inspection.tokens.push({ ...b.inspection.tokens[0], type: 'NAME', value: 'new' });
+  assert(compareSnapshots(a, b).categories.tokens.some(item => item.status === 'ADDED' && item.after.includes('new')));
+  assert(compareSnapshots(b, a).categories.tokens.some(item => item.status === 'REMOVED' && item.before.includes('new')));
+});
+test('structural and instruction metadata changes appear without relying on rendered dis text', () => {
+  const a = phaseFiveFixture(), b = phaseFiveFixture();
+  b.inspection.ast.nodes[0].type = 'Name';
+  b.inspection.codeObjects[0].stacksize = 3;
+  b.inspection.instructions[0].offset = 4;
+  b.inspection.instructions[0].source.endColumn = 8;
+  b.inspection.disassembly = a.inspection.disassembly;
+  const result = compareSnapshots(a, b);
+  assert.equal(result.categories.ast[0].status, 'CHANGED');
+  assert(result.categories['code-object'][0].before.includes('stacksize: 2') && result.categories['code-object'][0].after.includes('stacksize: 3'));
+  assert(result.categories.bytecode[0].detail.includes('offset') && result.categories.bytecode[0].detail.includes('source'));
+  assert.equal(result.summary.disassembly, result.summary.bytecode);
+});
+test('runtime differences are disclosed without assigning a cause', () => {
+  const a = phaseFiveFixture(), b = phaseFiveFixture();
+  assert.equal(compareSnapshots(a, b).runtimeDifference, false);
+  b.runtime.pythonVersion = '3.14.0';
+  assert.equal(compareSnapshots(a, b).runtimeDifference, true);
+  assert.equal(compareSnapshots(a, null), null);
+});
+test('large source comparison caps rendered rows but counts all changes', () => {
+  const a = phaseFiveFixture(), b = phaseFiveFixture();
+  a.source = 'a\n'.repeat(20_000); b.source = 'b\n'.repeat(20_000);
+  const rows = compareSnapshots(a, b).categories.source;
+  assert.equal(rows.length, 1_000);
+  assert.equal(rows.differences, 20_000);
+  assert.equal(rows.totalRows, 20_001);
+});
+test('very wide imported token and instruction ranges use bounded line indexing', () => {
+  const source = 'x\n'.repeat(1_000);
+  const trace = createTrace({ codeObjects: [{ name: '<module>', firstLine: 1 }],
+    instructions: [{ codeId: 'co-0', offset: 2, opcode: 'LOAD_CONST', source: { line: 1, column: 0, endLine: 999, endColumn: 1 } }] },
+  source, [{ type: 'STRING', value: 'x', line: 1, column: 1, endLine: 999, endColumn: 2 }]);
+  assert.equal(trace.onLine('tokens', 500).length, 1);
+  assert.equal(trace.onLine('instructions', 500).length, 1);
 });

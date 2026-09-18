@@ -33,6 +33,20 @@
         <div><p class="eyebrow">WRITE. RUN. UNDERSTAND.</p><h1 id="playground-title">Python playground<span>.</span></h1></div>
         <p class="heading-note">A small workspace for your code.<br>A closer look at how it runs.</p>
       </div>
+      <div class="snapshot-toolbar" aria-label="Workspace modes and snapshot files">
+        <div class="mode-switch" role="group" aria-label="Workspace mode">
+          <button id="mode-live" type="button" aria-pressed="true">Live</button>
+          <button id="mode-snapshot" type="button" aria-pressed="false">Snapshot</button>
+          <button id="mode-compare" type="button" aria-pressed="false">Compare</button>
+        </div>
+        <div class="snapshot-actions">
+          <label class="snapshot-import">Import snapshot A <input id="import-a" type="file" accept=".json,application/json" aria-label="Import snapshot A"></label>
+          <button id="clear-a" type="button">Clear A</button>
+          <label class="snapshot-import">Import snapshot B <input id="import-b" type="file" accept=".json,application/json" aria-label="Import snapshot B"></label>
+          <button id="clear-b" type="button">Clear B</button>
+        </div>
+      </div>
+      <p id="snapshot-status" class="snapshot-status" role="status" aria-live="polite"></p>
       <nav class="pipeline-nav" aria-label="Python compilation pipeline">
         <span class="pipeline-label">THE PIPELINE</span>
         <div class="pipeline-stages">
@@ -45,13 +59,13 @@
           <button type="button" data-stage="output" aria-label="Run code and show output">Run</button>
         </div>
       </nav>
-      <div class="workspace">
+      <div id="live-workspace" class="workspace">
         <section class="editor-pane" aria-labelledby="code-title">
           <div class="pane-toolbar"><h2 id="code-title"><span class="section-number">01</span> Source code</h2><span class="file-label">main.py</span></div>
           <div id="editor-host"><label class="sr-only" for="source">Python source code</label><textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off">print("Hello, world!")</textarea></div>
           <div class="editor-footer"><span id="cursor-position">Ln 1, Col 1</span><span>Python <span class="separator">/</span> 4 spaces</span></div>
         </section>
-        <section class="result-pane" aria-labelledby="result-title">
+        <section id="inspection-pane" class="result-pane" aria-labelledby="result-title">
           <div class="pane-toolbar"><h2 id="result-title"><span class="section-number">02</span> Result</h2><span id="execution-status" class="execution-status" role="status">Ready when you are</span></div>
           <div class="result-tabs" role="tablist" aria-label="Execution results">
             <button id="tab-trace" role="tab" aria-selected="false" aria-controls="panel-trace" data-tab="trace" tabindex="-1">Trace</button>
@@ -79,6 +93,28 @@
       <div class="workspace-caption"><span>Source → tokens → AST → code object → bytecode → execution.</span><a href="#how-it-works">Under the hood <span aria-hidden="true">↗</span></a></div>
       <div class="export-toolbar" aria-label="Downloads and inspection copy"><button id="download-source" type="button">Download source</button><button id="download-inspection" type="button" disabled>Download inspection</button><button id="copy-inspection" type="button" disabled>Copy inspection</button><span id="export-status" role="status" aria-live="polite"></span></div>
       <p id="runtime-notice" class="runtime-notice" role="status" hidden></p>
+      <div id="snapshot-workspace" class="workspace" hidden>
+        <section class="editor-pane" aria-labelledby="snapshot-source-title">
+          <div class="pane-toolbar"><h2 id="snapshot-source-title">Imported source</h2><span class="file-label">READ ONLY</span></div>
+          <div id="snapshot-editor-host"><label class="sr-only" for="snapshot-source">Imported Python source, read only</label><textarea id="snapshot-source" readonly></textarea></div>
+          <div class="editor-footer"><span id="snapshot-cursor-position">Ln 1, Col 1</span><span>IMPORTED SNAPSHOT · READ ONLY</span></div>
+          <div id="snapshot-metadata" class="snapshot-metadata"></div>
+        </section>
+        <div id="snapshot-result-slot"></div>
+      </div>
+      <section id="compare-workspace" class="compare-workspace" aria-label="Snapshot comparison" hidden>
+        <div id="compare-empty" class="compare-empty">Load snapshot A and snapshot B to compare their inspection data. Neither source is executed.</div>
+        <div id="compare-content" hidden>
+          <div class="compare-sides"><div><div id="compare-meta-a"></div><button id="inspect-a" type="button" class="text-button">Inspect A</button></div><div><div id="compare-meta-b"></div><button id="inspect-b" type="button" class="text-button">Inspect B</button></div></div>
+          <p id="compare-runtime-warning" class="inspection-warning" hidden>RUNTIME DIFFERENCE<br>The snapshots were produced by different runtime versions. Bytecode and instruction differences may therefore reflect runtime/compiler changes.</p>
+          <div id="compare-summary" class="compare-summary" aria-label="Comparison summary"></div>
+          <div id="compare-tabs" class="compare-tabs" role="tablist" aria-label="Comparison categories">
+            <button type="button" data-compare="source">Source</button><button type="button" data-compare="tokens">Tokens</button><button type="button" data-compare="ast">AST</button><button type="button" data-compare="code-object">Code object</button><button type="button" data-compare="bytecode">Bytecode</button><button type="button" data-compare="disassembly">Disassembly</button><button type="button" data-compare="execution">Execution</button>
+          </div>
+          <p id="compare-description" class="panel-description"></p>
+          <div id="compare-rows" class="compare-rows"></div>
+        </div>
+      </section>
       <noscript><p class="runtime-notice">Enable JavaScript to edit and execute Python in your browser.</p></noscript>
     </section>
 

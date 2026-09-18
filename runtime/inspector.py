@@ -121,9 +121,18 @@ def _pylab_make_runner():
                 truncated = True
                 return
             code_id = f"co-{len(objects)}"
+            def constant_text(value):
+                return f"<code object {value.co_name}>" if isinstance(value, code_type) else repr(value)[:120]
             objects.append({"id": code_id, "parentId": parent_id,
                             "name": code.co_name, "firstLine": code.co_firstlineno,
-                            "depth": depth})
+                            "depth": depth, "argcount": code.co_argcount,
+                            "nlocals": code.co_nlocals, "stacksize": code.co_stacksize,
+                            "flags": code.co_flags, "bytecodeLength": len(code.co_code),
+                            "constants": [constant_text(value) for value in code.co_consts[:200]],
+                            "names": list(code.co_names[:200]),
+                            "varnames": list(code.co_varnames[:200]),
+                            "metadataTruncated": any(len(values) > 200 for values in
+                                                     (code.co_consts, code.co_names, code.co_varnames))})
             for instruction in instructions(code, show_caches=False, adaptive=False):
                 if len(mapped) >= 4000:
                     truncated = True

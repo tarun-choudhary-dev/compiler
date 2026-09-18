@@ -25,6 +25,8 @@ After running, place the cursor on a source line to see its tokens, AST construc
 
 The AST tree and token table are interactive too. Select a node to inspect its fields and children, or select a token to inspect its value and start/end positions. The Trace tab shows the related items found from CPython's locations. **Download source** saves the current editor text as `program.py`. After a completed run, **Download inspection** saves a versioned JSON snapshot as `pylab-inspection.json`; **Copy inspection** copies that JSON when the browser permits clipboard access. A source edit disables inspection export until you run again.
 
+Use **Import snapshot A** to open a previously exported file in **Snapshot** mode. Its source appears in a separate read-only editor and its inspections use the same result tabs and Trace view. **Live** returns to your editable source and last live execution without replacing either. Import **snapshot B** and choose **Compare** to inspect source, token, AST, code-object, instruction, disassembly and execution differences. Clear A/B independently. Imports and comparisons are in-memory browser operations; neither runs Python.
+
 Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the editor and focuses the result tabs. Arrow keys, Home, and End navigate tabs.
 
 ## Complete source structure
@@ -58,7 +60,11 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 │   ├── results.js           # Bounded, validated worker result processing
 │   ├── view.js              # Text-only rendering and tab state
 │   ├── source-map.js        # Normalized ranges and cached relationships
-│   └── snapshot.js          # Versioned JSON inspection and browser downloads
+│   ├── snapshot.js          # Versioned JSON inspection and browser downloads
+│   ├── snapshot-validator.js # Import schema, size and depth validation
+│   ├── snapshot-session.js   # Read-only inspection state and selection
+│   ├── compare.js            # Pure serialized-data comparison
+│   └── snapshot-view.js      # Snapshot metadata and comparison rendering
 ├── vendor/codemirror/
 │   ├── codemirror.js
 │   ├── codemirror.css
@@ -78,7 +84,7 @@ Tab inserts four-space indentation; Shift + Tab outdents. Escape leaves the edit
 
 `node scripts/build.mjs` generates `dist/` containing the public entry files, `editor/`, `runtime/`, `ui/`, `vendor/`, license notices, and `.nojekyll`. `dist/` is ignored by Git. No server entry point is generated.
 
-`ui/source-map.js` normalizes source positions, caches line lookups, and resolves source/token/AST/instruction selections. `ui/snapshot.js` packages a completed run for browser-only export. `runtime/inspector.py` provides CPython metadata; `controller.js`, `editor/editor.js`, and `ui/view.js` handle selection state, marks, and rendering.
+`ui/source-map.js` normalizes source positions, caches line lookups, and resolves source/token/AST/instruction selections. `ui/snapshot.js` packages a completed run for browser-only export. `ui/snapshot-validator.js` gates untrusted import before any view state changes; `ui/compare.js` operates on validated JSON data only. `ui/snapshot-session.js` and `ui/snapshot-view.js` provide read-only selection and comparison rendering. `runtime/inspector.py` provides CPython metadata; `controller.js`, `editor/editor.js`, and `ui/view.js` handle live selection state, marks, and rendering. The imported view shares `ui/view.js` and has its own read-only editor.
 
 ## How execution works
 
@@ -151,9 +157,13 @@ The **Trace** tab gives line-based relationships when a source line is selected.
 
 ## Inspection snapshots
 
-`pylab-inspection.json` uses schema version `1`. It contains the source from the completed run, the actual Pyodide and Python version identifiers, bounded tokens and AST nodes, code-object records, CPython bytecode text and structured instructions, disassembly, normalized source mappings, and captured stdout/stderr/error. It contains JSON data only; importing it is not supported and downloading it never executes Python. The browser builds the file with `Blob` and an object URL. Copy uses the Clipboard API only when available; downloads require no clipboard permission.
+`pylab-inspection.json` uses schema version `1` and records its creation time for new exports. It contains the source from the completed run, the actual Pyodide and Python version identifiers, bounded tokens and AST nodes, code-object records, CPython bytecode text and structured instructions, disassembly, normalized source mappings, and captured stdout/stderr/error. Older v1 exports without creation time or the newer structured code-object metadata remain importable. The browser builds the file with `Blob` and an object URL. Copy uses the Clipboard API only when available; downloads require no clipboard permission.
 
-The bytecode and disassembly are **CPython-specific and version-dependent**. Compilation can fold constants or otherwise transform an AST construct, so an AST `BinOp` need not produce a `BINARY_OP`. Missing locations remain `null`; exported mappings are evidence from CPython metadata, not a perfect debugger map. Snapshot export is capped at 5 MB and disabled while the current source differs from the last completed run. Source download always uses the current editor text.
+**Imported snapshots are treated as untrusted serialized data. Importing a snapshot does not execute the Python source contained inside it.** The file input reads JSON locally and sends no upload request. Validation checks syntax, schema version, required fields and types, cross-references, nesting depth, array bounds and the 5 MB file size *before parsing*. Invalid files show an **INVALID SNAPSHOT** reason and do not replace a loaded slot. Version 2 or another unknown schema is rejected until a separate validator is implemented. Imported strings are rendered as text, never evaluated or inserted as HTML. Snapshot and comparison state stays in memory and is cleared on reload; no database or local storage is used.
+
+Comparison uses a bounded line diff for source and structured sequences for tokens, AST nodes, code-object metadata and CPython instructions. Token position-only changes are identified separately. The Disassembly category compares the structured instruction data first; raw `dis.dis` text is retained for reading in each snapshot. The view shows **ADDED**, **REMOVED**, **CHANGED** and **UNCHANGED** markers and counts all differences while capping rendered rows at 1,000 per category. A runtime/Python version mismatch displays a warning because instruction differences *may* come from compiler/runtime changes; the comparison does not assign a cause or claim semantic equivalence. Neither snapshot is passed to Pyodide for comparison.
+
+The bytecode and disassembly are **CPython-specific and version-dependent**. Compilation can fold constants or otherwise transform an AST construct, so an AST `BinOp` need not produce a `BINARY_OP`. Missing locations remain `null`; exported mappings are evidence from CPython metadata, not a perfect debugger map. Snapshot export and import are capped at 5 MB; export is disabled while the current source differs from the last completed run. Source download always uses the current editor text.
 
 ## Isolation and limits
 
@@ -219,10 +229,10 @@ node tests/browser-runtime.mjs
 
 The second command starts a temporary static file server and an isolated headless Chromium profile, then runs production Pyodide inside the real sandbox/worker. Set `CHROME_PATH` if Chrome/Edge is not at a detected path. Runtime download access is required. The fixture is excluded from `dist/`.
 
-The integration suite covers actual output, no-newline Unicode, stderr, exception types and lines, all inspection stages, nested functions/classes, loops, imports, Unicode identifiers and strings, syntax errors, fresh globals, bridge restrictions, output limits, and terminating/restarting an infinite loop. It also checks real CPython positions, AST fields and child links, interactive token/AST/instruction selection, downloads, snapshot contents, copy fallback, empty states, large inspections, and the mobile layout. Unit tests cover run lifecycle, result validation, range operations, Unicode conversion, token/AST relationships, snapshot schema and size bounds.
+The integration suite covers actual output, no-newline Unicode, stderr, exception types and lines, all inspection stages, nested functions/classes, loops, imports, Unicode identifiers and strings, syntax errors, fresh globals, bridge restrictions, output limits, and terminating/restarting an infinite loop. It also checks real CPython positions, AST fields and child links, interactive token/AST/instruction selection, downloads, snapshot contents, copy fallback, read-only import, inert malicious-looking strings, comparison, empty states, large inspections, and the mobile layout. Unit tests cover run lifecycle, result validation, range operations, Unicode conversion, token/AST relationships, schema validation, size/depth limits, and comparison data.
 
 For release QA, also check current Firefox and Safari, mobile touch editing, keyboard/screen-reader navigation, slow or blocked runtime downloads, long lines, and 200% text enlargement. Browser rendering and accessibility require their own manual review; automated runtime checks do not establish those properties.
 
 ## What to build next
 
-Next, add optional read-only snapshot import with strict schema validation and no automatic execution, then consider a focused side-by-side comparison of two saved inspections. Keep multi-file workspaces, REPL state, packages and additional language runtimes behind separate adapters so the current execution path remains small.
+Next, add an optional snapshot provenance/checksum note and selective export of comparison findings, while keeping imports read-only. A later phase could support a deliberate schema-v2 migration, rather than silently accepting new versions. Keep multi-file workspaces, REPL state, packages and additional language runtimes behind separate adapters so the current execution path remains small.
